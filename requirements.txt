@@ -1,0 +1,8 @@
+streamlit>=1.28.0
+pandas>=2.0.0
+numpy>=1.24.0
+plotly>=5.17.0
+reportlab>=4.0.0
+weasyprint>=60.0
+playwright>=1.40.0
+
