@@ -9,6 +9,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from data_utils import preprocess_data
 from io import BytesIO
+import sqlite3
 try:
     from reportlab.lib.pagesizes import letter, A4
     from reportlab.lib.units import inch
@@ -249,140 +250,133 @@ def calculate_league_hc_x_thresholds(df):
     }
 
 @st.cache_data
-def load_data(csv_path=None):
-    """Load data from CSV file - prioritize MLB_data.csv"""
+def load_data(db_path=None):
+    """Load data from SQLite database - prioritize MLB_data.sqlite"""
     # Get the current working directory
     current_dir = os.getcwd()
     script_dir = os.path.dirname(os.path.abspath(__file__))
     
-    # Try to find CSV file
-    if csv_path is None:
-        # Look for MLB_data.csv first (main data file)
-        possible_names = [
-            "MLB_data.csv",  # Prioritize this
-            "MLB25.csv",
-            "MLB_25.csv", 
-            "data.csv",
-            "hitter_data.csv",
-            "pitch_data.csv"
+    # Try to find SQLite database file
+    if db_path is None:
+        # Look for SQLite database first (preferred)
+        possible_db_names = [
+            "MLB_data.sqlite",  # Prioritize this
+            "MLB_data.db",
+            "MLB25.sqlite",
+            "MLB25.db",
+            "data.sqlite",
+            "data.db"
         ]
         
-        csv_path = None
-        for name in possible_names:
+        db_path = None
+        for name in possible_db_names:
             # Try current directory first
             full_path = os.path.join(current_dir, name)
             if os.path.exists(full_path):
-                csv_path = full_path
+                db_path = full_path
                 break
             # Try script directory
             full_path = os.path.join(script_dir, name)
             if os.path.exists(full_path):
-                csv_path = full_path
+                db_path = full_path
                 break
         
-        if csv_path is None:
-            # List CSV files in directory
-            try:
-                csv_files = [f for f in os.listdir(current_dir) if f.endswith('.csv') and f != 'Bat_path.csv']
-                if csv_files:
-                    csv_path = os.path.join(current_dir, csv_files[0])  # Use first CSV found (excluding Bat_path.csv)
-                else:
-                    # Try the script directory
-                    csv_files = [f for f in os.listdir(script_dir) if f.endswith('.csv') and f != 'Bat_path.csv']
-                    if csv_files:
-                        csv_path = os.path.join(script_dir, csv_files[0])
-                    else:
-                        st.error(f"No CSV file found in current directory: {current_dir}")
-                        st.info(f"Please ensure MLB_data.csv (or another CSV file) is in the same directory as the app.")
-                        st.info(f"Looking for files: {', '.join(possible_names)}")
-                        return None
-            except Exception as e:
-                st.error(f"Error searching for CSV files: {e}")
+        # If no SQLite database found, try CSV as fallback
+        if db_path is None:
+            st.warning("SQLite database not found, attempting to load from CSV file...")
+            # Try CSV files
+            possible_csv_names = [
+                "MLB_data.csv",
+                "MLB25.csv",
+                "MLB_25.csv", 
+                "data.csv"
+            ]
+            
+            csv_path = None
+            for name in possible_csv_names:
+                full_path = os.path.join(current_dir, name)
+                if os.path.exists(full_path):
+                    csv_path = full_path
+                    break
+                full_path = os.path.join(script_dir, name)
+                if os.path.exists(full_path):
+                    csv_path = full_path
+                    break
+            
+            if csv_path:
+                # Load from CSV (fallback)
+                return load_data_from_csv(csv_path)
+            else:
+                st.error("No data file found. Please ensure MLB_data.sqlite (or MLB_data.csv) is in the same directory as the app.")
                 return None
     
-    if not os.path.exists(csv_path):
-        st.error(f"CSV file not found: {csv_path}")
-        st.info(f"Current directory: {current_dir}")
+    if not os.path.exists(db_path):
+        st.error(f"Database file not found: {db_path}")
         return None
     
-    # Check if it's a Git LFS pointer file
     try:
-        with open(csv_path, 'r') as f:
-            first_line = f.readline()
-            if 'version https://git-lfs.github.com' in first_line:
-                st.error("⚠️ **Git LFS Issue Detected!**")
-                st.error("MLB_data.csv is stored with Git LFS but Streamlit Cloud cannot download it.")
-                st.info("**Solution**: The file needs to be uploaded directly (not via Git LFS) or hosted elsewhere.")
-                st.stop()
-    except:
-        pass
-    
-    try:
-        # Try different encodings and separators
-        df = None
-        encodings = ['utf-8', 'latin-1', 'cp1252']
-        separators = [',', ';', '\t']
+        # Connect to SQLite database
+        conn = sqlite3.connect(db_path)
         
-        for encoding in encodings:
-            for sep in separators:
-                try:
-                    df = pd.read_csv(csv_path, encoding=encoding, sep=sep, low_memory=False)
-                    if len(df) > 0:
-                                        # Don't show success message
-                        break
-                except Exception as e:
-                    # Show error for last attempt
-                    if encoding == encodings[-1] and sep == separators[-1]:
-                        error_msg = str(e)
-                        st.error(f"**Error reading CSV file:** {error_msg}")
-                        st.info(f"File path: {csv_path}")
-                        # Check if file might be Git LFS pointer
-                        if "unexpected" in error_msg.lower() or "columns" in error_msg.lower():
-                            st.warning("⚠️ This might be a Git LFS pointer file issue. Streamlit Cloud may not download Git LFS files automatically.")
-                    continue
-            if df is not None and len(df) > 0:
+        # Try common table names
+        possible_tables = ['MLB25', 'MLB_data', 'data', 'main']
+        table_name = None
+        
+        cursor = conn.cursor()
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+        available_tables = [row[0] for row in cursor.fetchall()]
+        
+        # Find matching table
+        for table in possible_tables:
+            if table in available_tables:
+                table_name = table
                 break
+        
+        if not table_name:
+            if available_tables:
+                table_name = available_tables[0]  # Use first available table
+            else:
+                st.error("No tables found in database")
+                conn.close()
+                return None
+        
+        # Load data from database
+        query = f"SELECT * FROM {table_name}"
+        df = pd.read_sql_query(query, conn)
+        conn.close()
         
         if df is None or len(df) == 0:
-            st.error("Could not read CSV file or file is empty")
-            # Check file size
-            try:
-                file_size = os.path.getsize(csv_path)
-                if file_size < 1000:  # Less than 1KB is suspicious for a 509MB file
-                    st.warning(f"⚠️ File size is only {file_size} bytes - this might be a Git LFS pointer file, not the actual data!")
-            except:
-                pass
+            st.error("Database is empty")
             return None
         
-        # Convert game_date to datetime - handle different date formats and column names
-        date_col = None
-        possible_date_cols = ['game_date', 'Game_Date', 'GAME_DATE', 'date', 'Date', 'DATE', 'gameDate', 'GameDate', 'game_date_utc']
-        
-        for col in possible_date_cols:
-            if col in df.columns:
-                date_col = col
-                break
-        
-        if date_col:
+        # Convert game_date to datetime
+        if 'game_date' in df.columns:
             try:
-                # Try parsing as datetime first
-                df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
-                
-                # If that fails, try Excel date serial number
-                if df[date_col].isna().all():
-                    # Check if original column is numeric (Excel serial date)
-                    original_series = df[date_col]
-                    if pd.api.types.is_numeric_dtype(original_series):
-                        df[date_col] = pd.to_datetime('1899-12-30') + pd.to_timedelta(original_series, unit='D')
+                # SQLite stores dates as REAL (numeric) or TEXT
+                if pd.api.types.is_numeric_dtype(df['game_date']):
+                    # Try different numeric date formats
+                    sample_value = df['game_date'].dropna().iloc[0] if len(df['game_date'].dropna()) > 0 else None
+                    
+                    if sample_value is not None:
+                        # Check if it's a Unix timestamp (seconds since 1970 - usually 10+ digits)
+                        if sample_value > 1000000000:  # Likely Unix timestamp
+                            df['game_date'] = pd.to_datetime(df['game_date'], unit='s', errors='coerce')
+                        # Check if it's Unix timestamp in milliseconds (13+ digits)
+                        elif sample_value > 1000000000000:
+                            df['game_date'] = pd.to_datetime(df['game_date'], unit='ms', errors='coerce')
+                        # Otherwise assume Excel serial date (days since 1900)
+                        else:
+                            df['game_date'] = pd.to_datetime('1899-12-30') + pd.to_timedelta(df['game_date'], unit='D')
+                    else:
+                        df['game_date'] = pd.to_datetime(df['game_date'], errors='coerce')
+                else:
+                    # Try parsing as datetime string
+                    df['game_date'] = pd.to_datetime(df['game_date'], errors='coerce')
                 
                 # Filter out invalid dates
-                df = df[df[date_col].notna()]
+                df = df[df['game_date'].notna()]
                 # Filter out dates before 2000 (likely errors)
-                df = df[df[date_col] >= pd.Timestamp('2000-01-01')]
-                
-                # Rename to 'game_date' for consistency
-                if date_col != 'game_date':
-                    df = df.rename(columns={date_col: 'game_date'})
+                df = df[df['game_date'] >= pd.Timestamp('2000-01-01')]
             except Exception as e:
                 pass  # Silently handle date parsing errors
         
@@ -398,6 +392,47 @@ def load_data(csv_path=None):
         # Preprocess data to add derived columns
         df = preprocess_data(df)
         
+        return df
+        
+    except Exception as e:
+        st.error(f"Error loading database: {e}")
+        import traceback
+        st.error(traceback.format_exc())
+        return None
+
+def load_data_from_csv(csv_path):
+    """Fallback function to load data from CSV (for backwards compatibility)"""
+    try:
+        encodings = ['utf-8', 'latin-1', 'cp1252']
+        separators = [',', ';', '\t']
+        
+        df = None
+        for encoding in encodings:
+            for sep in separators:
+                try:
+                    df = pd.read_csv(csv_path, encoding=encoding, sep=sep, low_memory=False)
+                    if len(df) > 0:
+                        break
+                except:
+                    continue
+            if df is not None and len(df) > 0:
+                break
+        
+        if df is None or len(df) == 0:
+            st.error("Could not read CSV file")
+            return None
+        
+        # Convert dates and filter (same as before)
+        if 'game_date' in df.columns:
+            df['game_date'] = pd.to_datetime(df['game_date'], errors='coerce')
+            df = df[df['game_date'].notna()]
+            df = df[df['game_date'] >= pd.Timestamp('2000-01-01')]
+        
+        if 'game_type' in df.columns:
+            game_types_post = ['R', 'F', 'D', 'L', 'W']
+            df = df[df['game_type'].isin(game_types_post)]
+        
+        df = preprocess_data(df)
         return df
         
     except Exception as e:
