@@ -2883,80 +2883,92 @@ def main():
         st.stop()
         return
     
-    selected_batter_display = st.sidebar.selectbox(
-        "Select Batter",
-        options=batter_display_names,
-        index=0
-    )
-    
-    # Get the original name format for filtering
-    selected_batter = name_mapping[selected_batter_display]
-    
-    # Date range - fix date handling (game_date should exist after load_data processing)
-    if 'game_date' in df.columns and len(df) > 0:
-        # Filter out invalid dates first
-        valid_dates = df[df['game_date'].notna()]['game_date']
-        if len(valid_dates) > 0:
-            min_date = valid_dates.min().date()
-            max_date = valid_dates.max().date()
-            # Ensure dates are reasonable (not 1970)
-            if min_date.year < 2000:
+    # UI Setup and Data Filtering
+    try:
+        selected_batter_display = st.sidebar.selectbox(
+            "Select Batter",
+            options=batter_display_names,
+            index=0
+        )
+        
+        # Get the original name format for filtering
+        selected_batter = name_mapping[selected_batter_display]
+        
+        # Date range - fix date handling (game_date should exist after load_data processing)
+        if 'game_date' in df.columns and len(df) > 0:
+            # Filter out invalid dates first
+            valid_dates = df[df['game_date'].notna()]['game_date']
+            if len(valid_dates) > 0:
+                min_date = valid_dates.min().date()
+                max_date = valid_dates.max().date()
+                # Ensure dates are reasonable (not 1970)
+                if min_date.year < 2000:
+                    min_date = date(2020, 1, 1)
+                if max_date.year < 2000:
+                    max_date = date.today()
+            else:
                 min_date = date(2020, 1, 1)
-            if max_date.year < 2000:
                 max_date = date.today()
         else:
+            # If no game_date column, use default range (date filtering will be skipped)
             min_date = date(2020, 1, 1)
             max_date = date.today()
-    else:
-        # If no game_date column, use default range (date filtering will be skipped)
-        min_date = date(2020, 1, 1)
-        max_date = date.today()
-    
-    date_range = st.sidebar.date_input(
-        "Date Range",
-        value=(min_date, max_date),
-        min_value=min_date,
-        max_value=max_date
-    )
-    
-    # Pitcher handedness - removed, always use all
-    selected_p_throws = ['R', 'L'] if 'p_throws' in df.columns else []
-    
-    # Filter data
-    filtered_df = df[df['batter_name'] == selected_batter].copy()
-    
-    # Apply date filter if game_date column exists
-    if 'game_date' in filtered_df.columns and isinstance(date_range, tuple) and len(date_range) == 2:
-        # Ensure game_date is datetime
-        if not pd.api.types.is_datetime64_any_dtype(filtered_df['game_date']):
-            try:
-                filtered_df['game_date'] = pd.to_datetime(filtered_df['game_date'], errors='coerce')
-            except:
-                pass
         
-        if pd.api.types.is_datetime64_any_dtype(filtered_df['game_date']):
-            filtered_df = filtered_df[
-                (filtered_df['game_date'].dt.date >= date_range[0]) &
-                (filtered_df['game_date'].dt.date <= date_range[1])
-            ]
-    
-    if selected_p_throws and 'p_throws' in filtered_df.columns:
-        filtered_df = filtered_df[filtered_df['p_throws'].isin(selected_p_throws)]
-    
-    # Header - logo and hitter name (name perfectly centered on page)
-    logo_col, name_col, empty_col = st.columns([1.5, 3, 1.5])
-    with logo_col:
-        logo_path = "CSP-Full-Logo.png"
-        if os.path.exists(logo_path):
-            st.markdown("<div style='display: flex; align-items: center; height: 100%;'>", unsafe_allow_html=True)
-            st.image(logo_path, width=350)
-            st.markdown("</div>", unsafe_allow_html=True)
-        else:
-            st.write("")  # Empty space if logo not found
-    with name_col:
-        st.markdown(f"<h3 style='text-align: center; margin-bottom: 0.1rem; margin-top: 0.1rem; color: #000000; padding-top: 1rem;'>{selected_batter_display}</h3>", unsafe_allow_html=True)
-    with empty_col:
-        st.write("")  # Empty column for spacing
+        date_range = st.sidebar.date_input(
+            "Date Range",
+            value=(min_date, max_date),
+            min_value=min_date,
+            max_value=max_date
+        )
+        
+        # Pitcher handedness - removed, always use all
+        selected_p_throws = ['R', 'L'] if 'p_throws' in df.columns else []
+        
+        # Filter data
+        filtered_df = df[df['batter_name'] == selected_batter].copy()
+        
+        # Apply date filter if game_date column exists
+        if 'game_date' in filtered_df.columns and isinstance(date_range, tuple) and len(date_range) == 2:
+            # Ensure game_date is datetime
+            if not pd.api.types.is_datetime64_any_dtype(filtered_df['game_date']):
+                try:
+                    filtered_df['game_date'] = pd.to_datetime(filtered_df['game_date'], errors='coerce')
+                except:
+                    pass
+            
+            if pd.api.types.is_datetime64_any_dtype(filtered_df['game_date']):
+                filtered_df = filtered_df[
+                    (filtered_df['game_date'].dt.date >= date_range[0]) &
+                    (filtered_df['game_date'].dt.date <= date_range[1])
+                ]
+        
+        if selected_p_throws and 'p_throws' in filtered_df.columns:
+            filtered_df = filtered_df[filtered_df['p_throws'].isin(selected_p_throws)]
+        
+        # Header - logo and hitter name (name perfectly centered on page)
+        logo_col, name_col, empty_col = st.columns([1.5, 3, 1.5])
+        with logo_col:
+            logo_path = "CSP-Full-Logo.png"
+            if os.path.exists(logo_path):
+                st.markdown("<div style='display: flex; align-items: center; height: 100%;'>", unsafe_allow_html=True)
+                st.image(logo_path, width=350)
+                st.markdown("</div>", unsafe_allow_html=True)
+            else:
+                st.write("")  # Empty space if logo not found
+        with name_col:
+            st.markdown(f"<h3 style='text-align: center; margin-bottom: 0.1rem; margin-top: 0.1rem; color: #000000; padding-top: 1rem;'>{selected_batter_display}</h3>", unsafe_allow_html=True)
+        with empty_col:
+            st.write("")  # Empty column for spacing
+            
+    except Exception as ui_error:
+        st.error("❌ **ERROR: Failed to set up UI or filter data**")
+        st.error(f"**Error:** {str(ui_error)}")
+        import traceback
+        st.error("**Full error traceback:**")
+        st.code(traceback.format_exc(), language='python')
+        st.info("**Please copy the error above and share it.**")
+        st.stop()
+        return
     
     # Calculate percentile references from full dataset (not filtered)
     # NOTE: This can be memory-intensive with large datasets. If it fails, we'll skip percentiles.
