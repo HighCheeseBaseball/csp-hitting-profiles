@@ -284,14 +284,14 @@ def download_database_from_url(url, local_path):
             elif 'id=' in url:
                 file_id = url.split('id=')[1].split('&')[0]
             
-            if file_id:
-                # Direct download URL
-                download_url = f"https://drive.google.com/uc?export=download&id={file_id}"
-            else:
-                download_url = url
+            if not file_id:
+                st.error("Could not extract file ID from Google Drive URL")
+                return False
+            
+            # Direct download URL
+            download_url = f"https://drive.google.com/uc?export=download&id={file_id}"
         else:
             download_url = url
-            file_id = None
         
         # Download the file
         progress_bar = st.progress(0)
@@ -304,27 +304,40 @@ def download_database_from_url(url, local_path):
             opener.addheaders = [('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')]
             
             # First attempt
-            response = opener.open(download_url)
+            try:
+                response = opener.open(download_url, timeout=30)
+            except Exception as e:
+                st.error(f"Failed to connect to Google Drive: {str(e)}")
+                return False
             
             # Check if Google Drive is showing a virus scan warning page
-            content = response.read()
-            content_str = content.decode('utf-8', errors='ignore').lower()
-            
-            if 'virus scan warning' in content_str or 'large file' in content_str:
-                # Need to confirm download - extract confirmation token
-                import re
-                confirm_match = re.search(r'confirm=([^&"\']+)', content.decode('utf-8', errors='ignore'))
-                if confirm_match:
-                    confirm_token = confirm_match.group(1)
-                    download_url = f"https://drive.google.com/uc?export=download&id={file_id}&confirm={confirm_token}"
-                    response = opener.open(download_url)
-                elif file_id:
-                    # Try with confirm=t parameter
-                    download_url = f"https://drive.google.com/uc?export=download&id={file_id}&confirm=t"
-                    response = opener.open(download_url)
+            try:
+                content = response.read()
+                content_str = content.decode('utf-8', errors='ignore').lower()
+                
+                if 'virus scan warning' in content_str or 'large file' in content_str:
+                    # Need to confirm download - extract confirmation token
+                    import re
+                    confirm_match = re.search(r'confirm=([^&"\']+)', content.decode('utf-8', errors='ignore'))
+                    if confirm_match and file_id:
+                        confirm_token = confirm_match.group(1)
+                        download_url = f"https://drive.google.com/uc?export=download&id={file_id}&confirm={confirm_token}"
+                        response.close()
+                        response = opener.open(download_url, timeout=30)
+                    elif file_id:
+                        # Try with confirm=t parameter
+                        download_url = f"https://drive.google.com/uc?export=download&id={file_id}&confirm=t"
+                        response.close()
+                        response = opener.open(download_url, timeout=30)
+            except Exception as e:
+                st.warning(f"Warning reading response: {str(e)}")
+                # Continue anyway - might still work
             
             # Get file size if available
-            total_size = int(response.headers.get('Content-Length', 0))
+            try:
+                total_size = int(response.headers.get('Content-Length', 0))
+            except:
+                total_size = 0
             
             # Write to local file
             downloaded = 0
@@ -332,24 +345,42 @@ def download_database_from_url(url, local_path):
             
             with open(local_path, 'wb') as f:
                 while True:
-                    chunk = response.read(chunk_size)
-                    if not chunk:
-                        break
-                    f.write(chunk)
-                    downloaded += len(chunk)
-                    
-                    # Update progress
-                    if total_size > 0:
-                        progress = min(downloaded / total_size, 1.0)
-                        progress_bar.progress(progress)
-                        status_text.text(f"Downloaded: {downloaded / (1024*1024):.1f} MB / {total_size / (1024*1024):.1f} MB")
+                    try:
+                        chunk = response.read(chunk_size)
+                        if not chunk:
+                            break
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        
+                        # Update progress
+                        if total_size > 0:
+                            progress = min(downloaded / total_size, 1.0)
+                            progress_bar.progress(progress)
+                            status_text.text(f"Downloaded: {downloaded / (1024*1024):.1f} MB / {total_size / (1024*1024):.1f} MB")
+                        else:
+                            status_text.text(f"Downloaded: {downloaded / (1024*1024):.1f} MB...")
+                    except Exception as e:
+                        st.error(f"Error during download: {str(e)}")
+                        return False
             
             progress_bar.progress(1.0)
             status_text.text("Download complete!")
-            progress_bar.empty()
-            status_text.empty()
             
-            return True
+            # Verify file was downloaded
+            if os.path.exists(local_path) and os.path.getsize(local_path) > 1000000:
+                progress_bar.empty()
+                status_text.empty()
+                return True
+            else:
+                st.error("Downloaded file appears to be invalid or too small")
+                return False
+                
+        except Exception as e:
+            st.error(f"Error during download: {str(e)}")
+            import traceback
+            with st.expander("Technical Details"):
+                st.code(traceback.format_exc())
+            return False
         finally:
             try:
                 response.close()
@@ -363,7 +394,6 @@ def download_database_from_url(url, local_path):
             st.code(traceback.format_exc())
         return False
 
-@st.cache_data
 def load_data(db_path=None, download_url=None):
     """Load data from SQLite database - prioritize MLB_data.sqlite"""
     # Get the current working directory
@@ -2652,7 +2682,18 @@ def generate_pdf_with_reportlab(batter_name, filtered_df, references, full_df, b
 def main():
     try:
         # Load data (no title, no upload option)
-        df = load_data()
+        try:
+            df = load_data()
+        except Exception as load_error:
+            st.error("⚠️ **Error loading data:**")
+            st.error(str(load_error))
+            import traceback
+            with st.expander("Technical Details"):
+                st.code(traceback.format_exc())
+            st.info("The app cannot continue without data.")
+            st.stop()
+            return
+        
         if df is None:
             st.error("⚠️ **Unable to load data file**")
             st.info("The SQLite database file (MLB_data.sqlite) may not be available.")
@@ -2660,15 +2701,9 @@ def main():
             st.markdown("- Git LFS file not downloaded by Streamlit Cloud")
             st.markdown("- Database file missing or corrupted")
             st.markdown("- File size too large for deployment")
+            st.markdown("- Google Drive file not publicly accessible")
             st.stop()
-    except Exception as e:
-        st.error("⚠️ **Error loading data:**")
-        st.error(str(e))
-        import traceback
-        with st.expander("Technical Details"):
-            st.code(traceback.format_exc())
-        st.info("The app cannot continue without data. Please check the database file.")
-        st.stop()
+            return
     
     # Sidebar filters
     
@@ -3039,5 +3074,15 @@ def main():
             st.session_state.profile_notes = notes
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        st.error("⚠️ **Application Error**")
+        st.error("The app encountered an error and cannot continue.")
+        st.error(f"Error: {str(e)}")
+        import traceback
+        with st.expander("Full Error Details"):
+            st.code(traceback.format_exc())
+        st.info("Please check the Streamlit Cloud logs for more information.")
+        st.stop()
 
