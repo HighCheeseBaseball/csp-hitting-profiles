@@ -2833,39 +2833,55 @@ def main():
     
     st.success(f"✅ Data loaded successfully! ({len(df):,} rows)")
     
-    # Sidebar filters
-    
-    # Get unique values and format names - try to find batter name column
-    batter_name_col = 'batter_name'
-    if 'batter_name' not in df.columns:
-        # Try common variations
-        possible_names = ['batter', 'Batter', 'BATTER', 'player_name', 'Player', 'name', 'Name']
-        for name in possible_names:
-            if name in df.columns:
-                batter_name_col = name
-                # Rename for consistency
-                df = df.rename(columns={name: 'batter_name'})
-                break
-    
-    if 'batter_name' in df.columns:
-        # Filter out null/empty names
-        df = df[df['batter_name'].notna()].copy()
-        df = df[df['batter_name'].astype(str).str.strip() != ''].copy()
+    # Process and prepare data for UI
+    try:
+        st.info("🔄 Processing data...")
         
-        batter_names_raw = sorted(df['batter_name'].unique())
-        # Create display names (First Last) and mapping
-        batter_display_names = [format_batter_name(name) for name in batter_names_raw]
-        # Create mapping from display name to original name
-        name_mapping = {display: original for display, original in zip(batter_display_names, batter_names_raw)}
-    else:
-        st.error("No batter names found in data")
-        st.info(f"Looking for column: 'batter_name' or variations")
-        st.info(f"Available columns: {', '.join(df.columns[:30])}")
+        # Sidebar filters
+        
+        # Get unique values and format names - try to find batter name column
+        batter_name_col = 'batter_name'
+        if 'batter_name' not in df.columns:
+            # Try common variations
+            possible_names = ['batter', 'Batter', 'BATTER', 'player_name', 'Player', 'name', 'Name']
+            for name in possible_names:
+                if name in df.columns:
+                    batter_name_col = name
+                    # Rename for consistency
+                    df = df.rename(columns={name: 'batter_name'})
+                    break
+        
+        if 'batter_name' in df.columns:
+            # Filter out null/empty names
+            df = df[df['batter_name'].notna()].copy()
+            df = df[df['batter_name'].astype(str).str.strip() != ''].copy()
+            
+            batter_names_raw = sorted(df['batter_name'].unique())
+            # Create display names (First Last) and mapping
+            batter_display_names = [format_batter_name(name) for name in batter_names_raw]
+            # Create mapping from display name to original name
+            name_mapping = {display: original for display, original in zip(batter_display_names, batter_names_raw)}
+        else:
+            st.error("❌ **No batter names found in data**")
+            st.info(f"Looking for column: 'batter_name' or variations")
+            st.info(f"Available columns: {', '.join(df.columns[:30])}")
+            st.stop()
+            return
+        
+        if len(batter_display_names) == 0:
+            st.error("❌ **No batter names found in data after filtering**")
+            st.stop()
+            return
+            
+    except Exception as process_error:
+        st.error("❌ **ERROR: Failed to process data**")
+        st.error(f"**Error:** {str(process_error)}")
+        import traceback
+        st.error("**Full error traceback:**")
+        st.code(traceback.format_exc(), language='python')
+        st.info("**Please copy the error above and share it.**")
         st.stop()
-    
-    if len(batter_display_names) == 0:
-        st.error("No batter names found in data after filtering")
-        st.stop()
+        return
     
     selected_batter_display = st.sidebar.selectbox(
         "Select Batter",
@@ -2943,21 +2959,33 @@ def main():
         st.write("")  # Empty column for spacing
     
     # Calculate percentile references from full dataset (not filtered)
-    references = calculate_percentile_references(df)
-    
-    # Calculate Bat Path percentile references from Bat_path.csv
-    bat_path_references = calculate_bat_path_percentile_references()
-    
-    # Merge Bat Path references into main references
-    for split in ['overall', 'rhp', 'lhp']:
-        if split in bat_path_references:
-            for key, values in bat_path_references[split].items():
-                references[split][key] = values
-    
-    # Calculate Pitch Tracking percentile references (only if needed - can be slow for large datasets)
-    # We'll calculate this lazily when the pitch tracking table is displayed
-    # For now, just initialize an empty dict - it will be calculated on demand
-    references['pitch_tracking'] = None  # Will be calculated on demand
+    try:
+        st.info("🔄 Calculating percentile references...")
+        references = calculate_percentile_references(df)
+        
+        # Calculate Bat Path percentile references from Bat_path.csv
+        bat_path_references = calculate_bat_path_percentile_references()
+        
+        # Merge Bat Path references into main references
+        for split in ['overall', 'rhp', 'lhp']:
+            if split in bat_path_references:
+                for key, values in bat_path_references[split].items():
+                    references[split][key] = values
+        
+        # Calculate Pitch Tracking percentile references (only if needed - can be slow for large datasets)
+        # We'll calculate this lazily when the pitch tracking table is displayed
+        # For now, just initialize an empty dict - it will be calculated on demand
+        references['pitch_tracking'] = None  # Will be calculated on demand
+    except Exception as calc_error:
+        st.error("❌ **ERROR: Failed to calculate percentile references**")
+        st.error(f"**Error:** {str(calc_error)}")
+        import traceback
+        st.error("**Full error traceback:**")
+        st.code(traceback.format_exc(), language='python')
+        st.info("**This might be a memory issue with the large dataset.**")
+        st.info("**Please copy the error above and share it.**")
+        st.stop()
+        return
     
     # Metrics sections - hr line closer to name
     st.markdown("<hr style='margin: 0.1rem 0 0.3rem 0;'>", unsafe_allow_html=True)
