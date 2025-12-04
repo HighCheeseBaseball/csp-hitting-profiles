@@ -448,26 +448,19 @@ def load_data(db_path=None, download_url=None):
                 except:
                     pass
         
-        # If no database found locally, try downloading from URL
-        if db_path is None and download_url:
-            st.info("📥 Database file not found locally. Attempting to download from cloud storage...")
-            local_db_path = os.path.join(script_dir, "MLB_data.sqlite")
-            try:
-                download_success = download_database_from_url(download_url, local_db_path)
-                if download_success and os.path.exists(local_db_path):
-                    file_size = os.path.getsize(local_db_path)
-                    if file_size > 1000000:  # More than 1MB
-                        db_path = local_db_path
-                        st.success(f"✅ Database downloaded successfully! ({file_size / (1024*1024):.1f} MB)")
-                    else:
-                        st.error(f"⚠️ Downloaded file is too small ({file_size} bytes). This might be an error page, not the database.")
-                else:
-                    st.error("❌ Download failed or file not found after download.")
-            except Exception as e:
-                st.error(f"❌ Error during download: {str(e)}")
-                import traceback
-                with st.expander("Download Error Details"):
-                    st.code(traceback.format_exc())
+        # If no database found locally, show error (don't try download - it times out)
+        if db_path is None:
+            st.error("⚠️ **Database file not found locally**")
+            st.warning("**Note:** Automatic download from Google Drive is disabled due to size limitations.")
+            st.info("**The database file (440MB) needs to be available locally for the app to work.**")
+            st.markdown("")
+            st.markdown("**Solutions:**")
+            st.markdown("1. **Host on remote database** (PostgreSQL/MySQL) - Recommended")
+            st.markdown("2. **Split database** into smaller chunks")
+            st.markdown("3. **Use Streamlit Cloud Team plan** with larger storage")
+            st.markdown("4. **Deploy to VPS/server** instead of Streamlit Cloud")
+            st.stop()
+            return None
         
         # If still no database found, show helpful error
         if db_path is None:
