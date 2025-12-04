@@ -412,41 +412,69 @@ def load_data(db_path=None, download_url=None):
         # Your Google Drive file ID
         download_url = "https://drive.google.com/file/d/110hFkIPXtvTskgxu4rRKeEyVZFZFeyBc/view?usp=sharing"
     
-    # Try to find SQLite database file
+    # Try to find SQLite database file or chunks
     if db_path is None:
-        # Look for SQLite database first (preferred)
-        possible_db_names = [
-            "MLB_data.sqlite",  # Prioritize this
-            "MLB_data.db",
-            "MLB25.sqlite",
-            "MLB25.db",
-            "data.sqlite",
-            "data.db"
-        ]
+        # First, check if we have database chunks that need to be combined
+        chunk_dir = os.path.join(script_dir, "database_chunks")
+        chunk_pattern = os.path.join(chunk_dir, "MLB_data.sqlite.part*")
+        import glob
+        chunk_files = sorted(glob.glob(chunk_pattern))
         
-        db_path = None
-        for name in possible_db_names:
-            # Try current directory first
-            full_path = os.path.join(current_dir, name)
-            if os.path.exists(full_path):
-                # Check if file is valid (not empty or pointer file)
-                try:
-                    file_size = os.path.getsize(full_path)
-                    if file_size > 1000000:  # More than 1MB, likely a real database
-                        db_path = full_path
-                        break
-                except:
-                    pass
-            # Try script directory
-            full_path = os.path.join(script_dir, name)
-            if os.path.exists(full_path):
-                try:
-                    file_size = os.path.getsize(full_path)
-                    if file_size > 1000000:
-                        db_path = full_path
-                        break
-                except:
-                    pass
+        if chunk_files:
+            # We have chunks - combine them
+            combined_db_path = os.path.join(script_dir, "MLB_data.sqlite")
+            if not os.path.exists(combined_db_path) or os.path.getsize(combined_db_path) < 1000000:
+                with st.spinner(f"Combining {len(chunk_files)} database chunks... This may take a minute."):
+                    try:
+                        with open(combined_db_path, 'wb') as outfile:
+                            for chunk_file in chunk_files:
+                                with open(chunk_file, 'rb') as infile:
+                                    outfile.write(infile.read())
+                        
+                        # Verify it worked
+                        if os.path.exists(combined_db_path) and os.path.getsize(combined_db_path) > 1000000:
+                            st.success(f"Database combined successfully! ({os.path.getsize(combined_db_path) / (1024*1024):.1f} MB)")
+                            db_path = combined_db_path
+                        else:
+                            st.error("Failed to combine database chunks")
+                    except Exception as e:
+                        st.error(f"Error combining chunks: {str(e)}")
+            else:
+                db_path = combined_db_path
+        
+        # Look for complete SQLite database file
+        if db_path is None:
+            possible_db_names = [
+                "MLB_data.sqlite",  # Prioritize this
+                "MLB_data.db",
+                "MLB25.sqlite",
+                "MLB25.db",
+                "data.sqlite",
+                "data.db"
+            ]
+            
+            for name in possible_db_names:
+                # Try current directory first
+                full_path = os.path.join(current_dir, name)
+                if os.path.exists(full_path):
+                    # Check if file is valid (not empty or pointer file)
+                    try:
+                        file_size = os.path.getsize(full_path)
+                        if file_size > 1000000:  # More than 1MB, likely a real database
+                            db_path = full_path
+                            break
+                    except:
+                        pass
+                # Try script directory
+                full_path = os.path.join(script_dir, name)
+                if os.path.exists(full_path):
+                    try:
+                        file_size = os.path.getsize(full_path)
+                        if file_size > 1000000:
+                            db_path = full_path
+                            break
+                    except:
+                        pass
         
         # If no database found locally, show error (don't try download - it times out)
         if db_path is None:
