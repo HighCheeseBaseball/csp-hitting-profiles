@@ -420,6 +420,11 @@ def load_data(db_path=None, download_url=None):
         chunk_pattern = os.path.join(chunk_dir, "MLB_data.sqlite.part*")
         chunk_files = sorted(glob.glob(chunk_pattern))
         
+        # Also check current directory for chunks
+        if not chunk_files:
+            chunk_pattern_alt = os.path.join(current_dir, "database_chunks", "MLB_data.sqlite.part*")
+            chunk_files = sorted(glob.glob(chunk_pattern_alt))
+        
         if chunk_files:
             st.info(f"📦 Found {len(chunk_files)} database chunks. Combining them...")
             # We have chunks - combine them
@@ -519,17 +524,36 @@ def load_data(db_path=None, download_url=None):
                     except:
                         pass
         
-        # If no database found locally, show error (don't try download - it times out)
+        # If no database found locally, show detailed error
         if db_path is None:
-            st.error("⚠️ **Database file not found locally**")
-            st.warning("**Note:** Automatic download from Google Drive is disabled due to size limitations.")
-            st.info("**The database file (440MB) needs to be available locally for the app to work.**")
+            st.error("❌ **Database file not found**")
+            st.markdown("**Checked locations:**")
+            st.markdown(f"- Current directory: `{current_dir}`")
+            st.markdown(f"- Script directory: `{script_dir}`")
+            st.markdown(f"- Chunk directory: `{chunk_dir}`")
+            
+            # Check what files exist
+            st.markdown("**Files found:**")
+            if os.path.exists(chunk_dir):
+                chunk_files_found = os.listdir(chunk_dir)
+                if chunk_files_found:
+                    st.info(f"Found {len(chunk_files_found)} files in chunk directory")
+                    for f in sorted(chunk_files_found)[:5]:
+                        st.text(f"  - {f}")
+                    if len(chunk_files_found) > 5:
+                        st.text(f"  ... and {len(chunk_files_found) - 5} more")
+                else:
+                    st.warning("Chunk directory exists but is empty")
+            else:
+                st.warning(f"Chunk directory does not exist: {chunk_dir}")
+            
+            st.markdown("**Looking for:**")
+            st.markdown("- Complete database: `MLB_data.sqlite`")
+            st.markdown("- Database chunks: `database_chunks/MLB_data.sqlite.part*`")
             st.markdown("")
-            st.markdown("**Solutions:**")
-            st.markdown("1. **Host on remote database** (PostgreSQL/MySQL) - Recommended")
-            st.markdown("2. **Split database** into smaller chunks")
-            st.markdown("3. **Use Streamlit Cloud Team plan** with larger storage")
-            st.markdown("4. **Deploy to VPS/server** instead of Streamlit Cloud")
+            st.markdown("**Please ensure:**")
+            st.markdown("1. All 9 chunks are uploaded to GitHub in `database_chunks/` folder")
+            st.markdown("2. Files are named correctly: `MLB_data.sqlite.part000` through `part008`")
             st.stop()
             return None
         
