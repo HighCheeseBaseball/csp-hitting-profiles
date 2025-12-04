@@ -305,6 +305,18 @@ def load_data(csv_path=None):
         st.info(f"Current directory: {current_dir}")
         return None
     
+    # Check if it's a Git LFS pointer file
+    try:
+        with open(csv_path, 'r') as f:
+            first_line = f.readline()
+            if 'version https://git-lfs.github.com' in first_line:
+                st.error("⚠️ **Git LFS Issue Detected!**")
+                st.error("MLB_data.csv is stored with Git LFS but Streamlit Cloud cannot download it.")
+                st.info("**Solution**: The file needs to be uploaded directly (not via Git LFS) or hosted elsewhere.")
+                st.stop()
+    except:
+        pass
+    
     try:
         # Try different encodings and separators
         df = None
@@ -318,13 +330,28 @@ def load_data(csv_path=None):
                     if len(df) > 0:
                                         # Don't show success message
                         break
-                except:
+                except Exception as e:
+                    # Show error for last attempt
+                    if encoding == encodings[-1] and sep == separators[-1]:
+                        error_msg = str(e)
+                        st.error(f"**Error reading CSV file:** {error_msg}")
+                        st.info(f"File path: {csv_path}")
+                        # Check if file might be Git LFS pointer
+                        if "unexpected" in error_msg.lower() or "columns" in error_msg.lower():
+                            st.warning("⚠️ This might be a Git LFS pointer file issue. Streamlit Cloud may not download Git LFS files automatically.")
                     continue
             if df is not None and len(df) > 0:
                 break
         
         if df is None or len(df) == 0:
             st.error("Could not read CSV file or file is empty")
+            # Check file size
+            try:
+                file_size = os.path.getsize(csv_path)
+                if file_size < 1000:  # Less than 1KB is suspicious for a 509MB file
+                    st.warning(f"⚠️ File size is only {file_size} bytes - this might be a Git LFS pointer file, not the actual data!")
+            except:
+                pass
             return None
         
         # Convert game_date to datetime - handle different date formats and column names
