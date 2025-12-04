@@ -272,12 +272,115 @@ def calculate_league_hc_x_thresholds(df):
         'center_max': upper_bound
     }
 
+def download_database_from_url(url, local_path):
+    """Download database file from URL (Google Drive or other cloud storage)"""
+    try:
+        # Extract file ID from Google Drive URL if needed
+        file_id = None
+        if 'drive.google.com' in url:
+            # Handle different Google Drive URL formats
+            if '/d/' in url:
+                file_id = url.split('/d/')[1].split('/')[0]
+            elif 'id=' in url:
+                file_id = url.split('id=')[1].split('&')[0]
+            
+            if file_id:
+                # Direct download URL
+                download_url = f"https://drive.google.com/uc?export=download&id={file_id}"
+            else:
+                download_url = url
+        else:
+            download_url = url
+            file_id = None
+        
+        # Download the file
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        status_text.text("Downloading database from Google Drive... This may take 5-10 minutes (440MB)")
+        
+        try:
+            # For large files, we need to handle Google Drive's virus scan warning
+            opener = urllib.request.build_opener()
+            opener.addheaders = [('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')]
+            
+            # First attempt
+            response = opener.open(download_url)
+            
+            # Check if Google Drive is showing a virus scan warning page
+            content = response.read()
+            content_str = content.decode('utf-8', errors='ignore').lower()
+            
+            if 'virus scan warning' in content_str or 'large file' in content_str:
+                # Need to confirm download - extract confirmation token
+                import re
+                confirm_match = re.search(r'confirm=([^&"\']+)', content.decode('utf-8', errors='ignore'))
+                if confirm_match:
+                    confirm_token = confirm_match.group(1)
+                    download_url = f"https://drive.google.com/uc?export=download&id={file_id}&confirm={confirm_token}"
+                    response = opener.open(download_url)
+                elif file_id:
+                    # Try with confirm=t parameter
+                    download_url = f"https://drive.google.com/uc?export=download&id={file_id}&confirm=t"
+                    response = opener.open(download_url)
+            
+            # Get file size if available
+            total_size = int(response.headers.get('Content-Length', 0))
+            
+            # Write to local file
+            downloaded = 0
+            chunk_size = 8192 * 4  # 32KB chunks for faster download
+            
+            with open(local_path, 'wb') as f:
+                while True:
+                    chunk = response.read(chunk_size)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    downloaded += len(chunk)
+                    
+                    # Update progress
+                    if total_size > 0:
+                        progress = min(downloaded / total_size, 1.0)
+                        progress_bar.progress(progress)
+                        status_text.text(f"Downloaded: {downloaded / (1024*1024):.1f} MB / {total_size / (1024*1024):.1f} MB")
+            
+            progress_bar.progress(1.0)
+            status_text.text("Download complete!")
+            progress_bar.empty()
+            status_text.empty()
+            
+            return True
+        finally:
+            try:
+                response.close()
+            except:
+                pass
+        
+    except Exception as e:
+        st.error(f"Error downloading database: {str(e)}")
+        import traceback
+        with st.expander("Technical Details"):
+            st.code(traceback.format_exc())
+        return False
+
 @st.cache_data
-def load_data(db_path=None):
+def load_data(db_path=None, download_url=None):
     """Load data from SQLite database - prioritize MLB_data.sqlite"""
     # Get the current working directory
     current_dir = os.getcwd()
     script_dir = os.path.dirname(os.path.abspath(__file__))
+    
+    # Try to get download URL from secrets if not provided
+    if download_url is None:
+        try:
+            download_url = st.secrets.get("database_download_url", None)
+        except:
+            download_url = None
+    
+    # Default Google Drive URL (fallback if not in secrets)
+    if download_url is None:
+        # Your Google Drive file ID
+        download_url = "https://drive.google.com/file/d/110hFkIPXtvTskgxu4rRKeEyVZFZFeyBc/view?usp=sharing"
     
     # Try to find SQLite database file
     if db_path is None:
@@ -296,25 +399,43 @@ def load_data(db_path=None):
             # Try current directory first
             full_path = os.path.join(current_dir, name)
             if os.path.exists(full_path):
-                db_path = full_path
-                break
+                # Check if file is valid (not empty or pointer file)
+                try:
+                    file_size = os.path.getsize(full_path)
+                    if file_size > 1000000:  # More than 1MB, likely a real database
+                        db_path = full_path
+                        break
+                except:
+                    pass
             # Try script directory
             full_path = os.path.join(script_dir, name)
             if os.path.exists(full_path):
-                db_path = full_path
-                break
+                try:
+                    file_size = os.path.getsize(full_path)
+                    if file_size > 1000000:
+                        db_path = full_path
+                        break
+                except:
+                    pass
         
-        # If no SQLite database found, show helpful error
+        # If no database found locally, try downloading from URL
+        if db_path is None and download_url:
+            local_db_path = os.path.join(script_dir, "MLB_data.sqlite")
+            if download_database_from_url(download_url, local_db_path):
+                if os.path.exists(local_db_path) and os.path.getsize(local_db_path) > 1000000:
+                    db_path = local_db_path
+        
+        # If still no database found, show helpful error
         if db_path is None:
             st.error("⚠️ **Database file not found**")
-            st.info("MLB_data.sqlite is not available. This is likely because:")
-            st.markdown("- Streamlit Cloud doesn't automatically download Git LFS files")
-            st.markdown("- The database file (440MB) is too large for direct upload")
-            st.markdown("")
-            st.info("**Solutions:**")
-            st.markdown("1. Host the database on cloud storage (Google Drive, Dropbox, AWS S3)")
-            st.markdown("2. Use a remote database (PostgreSQL, MySQL)")
-            st.markdown("3. Split the database into smaller chunks")
+            st.info("MLB_data.sqlite is not available locally and couldn't be downloaded.")
+            if download_url:
+                st.error(f"Failed to download from: {download_url}")
+            else:
+                st.info("**To fix this:**")
+                st.markdown("1. Upload MLB_data.sqlite to Google Drive")
+                st.markdown("2. Get the shareable link")
+                st.markdown("3. Add it to Streamlit Secrets as `database_download_url`")
             st.stop()
     
     if not os.path.exists(db_path):
