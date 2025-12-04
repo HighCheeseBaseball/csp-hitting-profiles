@@ -10,6 +10,8 @@ import plotly.graph_objects as go
 from data_utils import preprocess_data
 from io import BytesIO
 import sqlite3
+import urllib.request
+import shutil
 try:
     from reportlab.lib.pagesizes import letter, A4
     from reportlab.lib.units import inch
@@ -86,6 +88,27 @@ def check_password():
 # Check password before loading app
 if not check_password():
     st.stop()  # Stop execution if password is incorrect
+
+# Add error handler to catch startup errors
+try:
+    import sys
+    import traceback
+    
+    def handle_exception(exc_type, exc_value, exc_traceback):
+        if issubclass(exc_type, KeyboardInterrupt):
+            sys.__excepthook__(exc_type, exc_value, exc_traceback)
+            return
+        
+        error_msg = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
+        st.error(f"**Application Error:**")
+        st.code(error_msg, language='python')
+        st.info("Please check the logs for more details.")
+    
+    # Only set handler if we're past password check
+    if "password_correct" in st.session_state and st.session_state["password_correct"]:
+        pass  # We'll handle errors in the main function instead
+except:
+    pass
 
 # Custom CSS - White background with black text
 st.markdown("""
@@ -281,34 +304,18 @@ def load_data(db_path=None):
                 db_path = full_path
                 break
         
-        # If no SQLite database found, try CSV as fallback
+        # If no SQLite database found, show helpful error
         if db_path is None:
-            st.warning("SQLite database not found, attempting to load from CSV file...")
-            # Try CSV files
-            possible_csv_names = [
-                "MLB_data.csv",
-                "MLB25.csv",
-                "MLB_25.csv", 
-                "data.csv"
-            ]
-            
-            csv_path = None
-            for name in possible_csv_names:
-                full_path = os.path.join(current_dir, name)
-                if os.path.exists(full_path):
-                    csv_path = full_path
-                    break
-                full_path = os.path.join(script_dir, name)
-                if os.path.exists(full_path):
-                    csv_path = full_path
-                    break
-            
-            if csv_path:
-                # Load from CSV (fallback)
-                return load_data_from_csv(csv_path)
-            else:
-                st.error("No data file found. Please ensure MLB_data.sqlite (or MLB_data.csv) is in the same directory as the app.")
-                return None
+            st.error("⚠️ **Database file not found**")
+            st.info("MLB_data.sqlite is not available. This is likely because:")
+            st.markdown("- Streamlit Cloud doesn't automatically download Git LFS files")
+            st.markdown("- The database file (440MB) is too large for direct upload")
+            st.markdown("")
+            st.info("**Solutions:**")
+            st.markdown("1. Host the database on cloud storage (Google Drive, Dropbox, AWS S3)")
+            st.markdown("2. Use a remote database (PostgreSQL, MySQL)")
+            st.markdown("3. Split the database into smaller chunks")
+            st.stop()
     
     if not os.path.exists(db_path):
         st.error(f"Database file not found: {db_path}")
@@ -2522,9 +2529,24 @@ def generate_pdf_with_reportlab(batter_name, filtered_df, references, full_df, b
 
 # Main app
 def main():
-    # Load data (no title, no upload option)
-    df = load_data()
-    if df is None:
+    try:
+        # Load data (no title, no upload option)
+        df = load_data()
+        if df is None:
+            st.error("⚠️ **Unable to load data file**")
+            st.info("The SQLite database file (MLB_data.sqlite) may not be available.")
+            st.info("**Possible causes:**")
+            st.markdown("- Git LFS file not downloaded by Streamlit Cloud")
+            st.markdown("- Database file missing or corrupted")
+            st.markdown("- File size too large for deployment")
+            st.stop()
+    except Exception as e:
+        st.error("⚠️ **Error loading data:**")
+        st.error(str(e))
+        import traceback
+        with st.expander("Technical Details"):
+            st.code(traceback.format_exc())
+        st.info("The app cannot continue without data. Please check the database file.")
         st.stop()
     
     # Sidebar filters
