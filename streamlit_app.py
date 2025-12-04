@@ -2959,33 +2959,33 @@ def main():
         st.write("")  # Empty column for spacing
     
     # Calculate percentile references from full dataset (not filtered)
+    # NOTE: This can be memory-intensive with large datasets. If it fails, we'll skip percentiles.
+    references = {'overall': {}, 'rhp': {}, 'lhp': {}, 'pitch_tracking': None}
+    
     try:
-        st.info("🔄 Calculating percentile references...")
-        references = calculate_percentile_references(df)
-        
-        # Calculate Bat Path percentile references from Bat_path.csv
-        bat_path_references = calculate_bat_path_percentile_references()
-        
-        # Merge Bat Path references into main references
-        for split in ['overall', 'rhp', 'lhp']:
-            if split in bat_path_references:
-                for key, values in bat_path_references[split].items():
-                    references[split][key] = values
-        
-        # Calculate Pitch Tracking percentile references (only if needed - can be slow for large datasets)
-        # We'll calculate this lazily when the pitch tracking table is displayed
-        # For now, just initialize an empty dict - it will be calculated on demand
-        references['pitch_tracking'] = None  # Will be calculated on demand
+        # Show loading message but don't block if it fails
+        with st.spinner("Calculating percentile references (this may take a minute)..."):
+            references = calculate_percentile_references(df)
+            
+            # Calculate Bat Path percentile references from Bat_path.csv
+            bat_path_references = calculate_bat_path_percentile_references()
+            
+            # Merge Bat Path references into main references
+            for split in ['overall', 'rhp', 'lhp']:
+                if split in bat_path_references:
+                    for key, values in bat_path_references[split].items():
+                        references[split][key] = values
+            
+            # Pitch tracking will be calculated on demand
+            references['pitch_tracking'] = None
     except Exception as calc_error:
-        st.error("❌ **ERROR: Failed to calculate percentile references**")
-        st.error(f"**Error:** {str(calc_error)}")
-        import traceback
-        st.error("**Full error traceback:**")
-        st.code(traceback.format_exc(), language='python')
-        st.info("**This might be a memory issue with the large dataset.**")
-        st.info("**Please copy the error above and share it.**")
-        st.stop()
-        return
+        # Don't crash - just warn and continue without percentiles
+        st.warning("⚠️ **Warning: Could not calculate percentile references**")
+        st.info(f"**Reason:** {str(calc_error)}")
+        st.info("**The app will continue without percentile coloring.**")
+        st.markdown("---")
+        # Initialize empty references so app can continue
+        references = {'overall': {}, 'rhp': {}, 'lhp': {}, 'pitch_tracking': None}
     
     # Metrics sections - hr line closer to name
     st.markdown("<hr style='margin: 0.1rem 0 0.3rem 0;'>", unsafe_allow_html=True)
