@@ -12,6 +12,7 @@ from io import BytesIO
 import sqlite3
 import urllib.request
 import shutil
+import glob
 try:
     from reportlab.lib.pagesizes import letter, A4
     from reportlab.lib.units import inch
@@ -417,7 +418,6 @@ def load_data(db_path=None, download_url=None):
         # First, check if we have database chunks that need to be combined
         chunk_dir = os.path.join(script_dir, "database_chunks")
         chunk_pattern = os.path.join(chunk_dir, "MLB_data.sqlite.part*")
-        import glob
         chunk_files = sorted(glob.glob(chunk_pattern))
         
         if chunk_files:
