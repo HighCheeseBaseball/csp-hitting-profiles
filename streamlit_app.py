@@ -450,23 +450,42 @@ def load_data(db_path=None, download_url=None):
         
         # If no database found locally, try downloading from URL
         if db_path is None and download_url:
+            st.info("📥 Database file not found locally. Attempting to download from cloud storage...")
             local_db_path = os.path.join(script_dir, "MLB_data.sqlite")
-            if download_database_from_url(download_url, local_db_path):
-                if os.path.exists(local_db_path) and os.path.getsize(local_db_path) > 1000000:
-                    db_path = local_db_path
+            try:
+                download_success = download_database_from_url(download_url, local_db_path)
+                if download_success and os.path.exists(local_db_path):
+                    file_size = os.path.getsize(local_db_path)
+                    if file_size > 1000000:  # More than 1MB
+                        db_path = local_db_path
+                        st.success(f"✅ Database downloaded successfully! ({file_size / (1024*1024):.1f} MB)")
+                    else:
+                        st.error(f"⚠️ Downloaded file is too small ({file_size} bytes). This might be an error page, not the database.")
+                else:
+                    st.error("❌ Download failed or file not found after download.")
+            except Exception as e:
+                st.error(f"❌ Error during download: {str(e)}")
+                import traceback
+                with st.expander("Download Error Details"):
+                    st.code(traceback.format_exc())
         
         # If still no database found, show helpful error
         if db_path is None:
             st.error("⚠️ **Database file not found**")
             st.info("MLB_data.sqlite is not available locally and couldn't be downloaded.")
+            st.markdown("**Possible causes:**")
+            st.markdown("1. Google Drive file is not set to 'Anyone with the link can view'")
+            st.markdown("2. Download timed out (file is 440MB)")
+            st.markdown("3. Network/connection issue")
+            st.markdown("")
             if download_url:
-                st.error(f"Failed to download from: {download_url}")
-            else:
-                st.info("**To fix this:**")
-                st.markdown("1. Upload MLB_data.sqlite to Google Drive")
-                st.markdown("2. Get the shareable link")
-                st.markdown("3. Add it to Streamlit Secrets as `database_download_url`")
+                st.info(f"**Download URL:** {download_url}")
+                st.markdown("**To fix:**")
+                st.markdown("1. Go to your Google Drive file")
+                st.markdown("2. Right-click → Share → Change to 'Anyone with the link'")
+                st.markdown("3. Refresh this page and try again")
             st.stop()
+            return None
     
     if not os.path.exists(db_path):
         st.error(f"Database file not found: {db_path}")
@@ -474,38 +493,48 @@ def load_data(db_path=None, download_url=None):
     
     try:
         # Connect to SQLite database
-        conn = sqlite3.connect(db_path)
+        try:
+            conn = sqlite3.connect(db_path)
+        except Exception as conn_error:
+            st.error(f"Failed to connect to database: {str(conn_error)}")
+            st.info(f"Database path: {db_path}")
+            return None
         
-        # Try common table names
-        possible_tables = ['MLB25', 'MLB_data', 'data', 'main']
-        table_name = None
-        
-        cursor = conn.cursor()
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
-        available_tables = [row[0] for row in cursor.fetchall()]
-        
-        # Find matching table
-        for table in possible_tables:
-            if table in available_tables:
-                table_name = table
-                break
-        
-        if not table_name:
-            if available_tables:
-                table_name = available_tables[0]  # Use first available table
-            else:
-                st.error("No tables found in database")
+        try:
+            # Try common table names
+            possible_tables = ['MLB25', 'MLB_data', 'data', 'main']
+            table_name = None
+            
+            cursor = conn.cursor()
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+            available_tables = [row[0] for row in cursor.fetchall()]
+            
+            # Find matching table
+            for table in possible_tables:
+                if table in available_tables:
+                    table_name = table
+                    break
+            
+            if not table_name:
+                if available_tables:
+                    table_name = available_tables[0]  # Use first available table
+                    st.info(f"Using table: {table_name}")
+                else:
+                    st.error("No tables found in database")
+                    conn.close()
+                    return None
+            
+            # Load data from database
+            query = f"SELECT * FROM {table_name}"
+            df = pd.read_sql_query(query, conn)
+            
+            if df is None or len(df) == 0:
+                st.error("Database is empty")
                 conn.close()
                 return None
-        
-        # Load data from database
-        query = f"SELECT * FROM {table_name}"
-        df = pd.read_sql_query(query, conn)
-        conn.close()
-        
-        if df is None or len(df) == 0:
-            st.error("Database is empty")
-            return None
+                
+        finally:
+            conn.close()
         
         # Convert game_date to datetime
         if 'game_date' in df.columns:
@@ -2680,30 +2709,33 @@ def generate_pdf_with_reportlab(batter_name, filtered_df, references, full_df, b
 
 # Main app
 def main():
+    # Load data (no title, no upload option)
     try:
-        # Load data (no title, no upload option)
-        try:
+        with st.spinner("Loading data..."):
             df = load_data()
-        except Exception as load_error:
-            st.error("⚠️ **Error loading data:**")
-            st.error(str(load_error))
-            import traceback
-            with st.expander("Technical Details"):
-                st.code(traceback.format_exc())
-            st.info("The app cannot continue without data.")
-            st.stop()
-            return
-        
-        if df is None:
-            st.error("⚠️ **Unable to load data file**")
-            st.info("The SQLite database file (MLB_data.sqlite) may not be available.")
-            st.info("**Possible causes:**")
-            st.markdown("- Git LFS file not downloaded by Streamlit Cloud")
-            st.markdown("- Database file missing or corrupted")
-            st.markdown("- File size too large for deployment")
-            st.markdown("- Google Drive file not publicly accessible")
-            st.stop()
-            return
+    except Exception as load_error:
+        st.error("⚠️ **Error loading data:**")
+        st.error(str(load_error))
+        import traceback
+        st.error("Full error details:")
+        with st.expander("Technical Details"):
+            st.code(traceback.format_exc())
+        st.info("The app cannot continue without data. Please check the error above.")
+        st.stop()
+        return
+    
+    if df is None:
+        st.error("⚠️ **Unable to load data file**")
+        st.info("The SQLite database file (MLB_data.sqlite) could not be loaded.")
+        st.info("**Check the messages above for specific error details.**")
+        st.stop()
+        return
+    
+    if len(df) == 0:
+        st.error("⚠️ **Data file is empty**")
+        st.info("The database was loaded but contains no data.")
+        st.stop()
+        return
     
     # Sidebar filters
     
