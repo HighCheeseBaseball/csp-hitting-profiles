@@ -421,24 +421,67 @@ def load_data(db_path=None, download_url=None):
         chunk_files = sorted(glob.glob(chunk_pattern))
         
         if chunk_files:
+            st.info(f"📦 Found {len(chunk_files)} database chunks. Combining them...")
             # We have chunks - combine them
             combined_db_path = os.path.join(script_dir, "MLB_data.sqlite")
-            if not os.path.exists(combined_db_path) or os.path.getsize(combined_db_path) < 1000000:
-                with st.spinner(f"Combining {len(chunk_files)} database chunks... This may take a minute."):
-                    try:
-                        with open(combined_db_path, 'wb') as outfile:
-                            for chunk_file in chunk_files:
-                                with open(chunk_file, 'rb') as infile:
-                                    outfile.write(infile.read())
-                        
-                        # Verify it worked
-                        if os.path.exists(combined_db_path) and os.path.getsize(combined_db_path) > 1000000:
-                            st.success(f"Database combined successfully! ({os.path.getsize(combined_db_path) / (1024*1024):.1f} MB)")
+            
+            # Check if already combined
+            if os.path.exists(combined_db_path):
+                try:
+                    file_size = os.path.getsize(combined_db_path)
+                    if file_size > 400000000:  # More than 400MB - likely complete
+                        st.success(f"✅ Using existing combined database ({file_size / (1024*1024):.1f} MB)")
+                        db_path = combined_db_path
+                    else:
+                        st.info("Existing combined file is too small, recombining...")
+                        os.remove(combined_db_path)  # Remove incomplete file
+                except:
+                    pass
+            
+            # Combine chunks if not already done
+            if db_path is None:
+                progress_bar = st.progress(0)
+                status_text = st.empty()
+                
+                try:
+                    total_size = sum(os.path.getsize(f) for f in chunk_files)
+                    downloaded = 0
+                    
+                    with open(combined_db_path, 'wb') as outfile:
+                        for i, chunk_file in enumerate(chunk_files):
+                            status_text.text(f"Combining chunk {i+1}/{len(chunk_files)}...")
+                            with open(chunk_file, 'rb') as infile:
+                                chunk_data = infile.read()
+                                outfile.write(chunk_data)
+                                downloaded += len(chunk_data)
+                                progress_bar.progress(min(downloaded / total_size, 1.0))
+                    
+                    # Verify it worked
+                    if os.path.exists(combined_db_path):
+                        final_size = os.path.getsize(combined_db_path)
+                        if final_size > 400000000:  # More than 400MB
+                            progress_bar.progress(1.0)
+                            status_text.text(f"✅ Database combined! ({final_size / (1024*1024):.1f} MB)")
+                            progress_bar.empty()
+                            status_text.empty()
                             db_path = combined_db_path
                         else:
-                            st.error("Failed to combine database chunks")
-                    except Exception as e:
-                        st.error(f"Error combining chunks: {str(e)}")
+                            st.error(f"❌ Combined file is too small: {final_size / (1024*1024):.1f} MB (expected ~440 MB)")
+                            if os.path.exists(combined_db_path):
+                                os.remove(combined_db_path)
+                    else:
+                        st.error("❌ Failed to create combined database file")
+                        
+                except Exception as e:
+                    st.error(f"❌ Error combining chunks: {str(e)}")
+                    import traceback
+                    with st.expander("Combination Error Details"):
+                        st.code(traceback.format_exc())
+                    if os.path.exists(combined_db_path):
+                        try:
+                            os.remove(combined_db_path)
+                        except:
+                            pass
             else:
                 db_path = combined_db_path
         
@@ -2732,31 +2775,39 @@ def generate_pdf_with_reportlab(batter_name, filtered_df, references, full_df, b
 def main():
     # Load data (no title, no upload option)
     try:
-        with st.spinner("Loading data..."):
-            df = load_data()
+        st.info("🔄 Loading data...")
+        df = load_data()
     except Exception as load_error:
-        st.error("⚠️ **Error loading data:**")
-        st.error(str(load_error))
+        st.error("❌ **ERROR: Failed to load data**")
+        st.error(f"**Error message:** {str(load_error)}")
+        st.markdown("---")
         import traceback
-        st.error("Full error details:")
-        with st.expander("Technical Details"):
-            st.code(traceback.format_exc())
-        st.info("The app cannot continue without data. Please check the error above.")
+        error_details = traceback.format_exc()
+        st.error("**Full error traceback:**")
+        st.code(error_details, language='python')
+        st.markdown("---")
+        st.info("**Please copy the error above and share it so we can fix this.**")
         st.stop()
         return
     
     if df is None:
-        st.error("⚠️ **Unable to load data file**")
-        st.info("The SQLite database file (MLB_data.sqlite) could not be loaded.")
-        st.info("**Check the messages above for specific error details.**")
+        st.error("❌ **ERROR: Data is None**")
+        st.info("The load_data() function returned None.")
+        st.markdown("**Check the messages above for details about what went wrong.**")
         st.stop()
         return
     
     if len(df) == 0:
-        st.error("⚠️ **Data file is empty**")
-        st.info("The database was loaded but contains no data.")
+        st.error("❌ **ERROR: Data is empty**")
+        st.info("The database was loaded but contains no rows.")
+        st.markdown("**This might mean:**")
+        st.markdown("- Database is empty")
+        st.markdown("- All data was filtered out")
+        st.markdown("- Wrong table selected")
         st.stop()
         return
+    
+    st.success(f"✅ Data loaded successfully! ({len(df):,} rows)")
     
     # Sidebar filters
     
@@ -3130,12 +3181,14 @@ if __name__ == "__main__":
     try:
         main()
     except Exception as e:
-        st.error("⚠️ **Application Error**")
-        st.error("The app encountered an error and cannot continue.")
-        st.error(f"Error: {str(e)}")
+        st.error("❌ **Application Error - App Crashed**")
+        st.error(f"**Error:** {str(e)}")
+        st.markdown("---")
+        st.error("**Full error details:**")
         import traceback
-        with st.expander("Full Error Details"):
-            st.code(traceback.format_exc())
-        st.info("Please check the Streamlit Cloud logs for more information.")
+        error_trace = traceback.format_exc()
+        st.code(error_trace, language='python')
+        st.markdown("---")
+        st.info("**Please copy the error above and share it so we can fix the issue.**")
         st.stop()
 
