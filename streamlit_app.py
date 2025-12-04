@@ -3201,18 +3201,23 @@ def main():
             save_notes(notes)
             st.session_state.profile_notes = notes
 
-if __name__ == "__main__":
-    try:
+# Run the app - wrap in error handler
+try:
+    if __name__ == "__main__":
         main()
-    except Exception as e:
-        st.error("❌ **Application Error - App Crashed**")
-        st.error(f"**Error:** {str(e)}")
-        st.markdown("---")
-        st.error("**Full error details:**")
-        import traceback
-        error_trace = traceback.format_exc()
-        st.code(error_trace, language='python')
-        st.markdown("---")
-        st.info("**Please copy the error above and share it so we can fix the issue.**")
-        st.stop()
+except SystemExit:
+    # This is normal when using st.stop()
+    pass
+except Exception as e:
+    st.error("❌ **CRITICAL ERROR - App Crashed**")
+    st.error(f"**Error Type:** {type(e).__name__}")
+    st.error(f"**Error Message:** {str(e)}")
+    st.markdown("---")
+    import traceback
+    error_trace = traceback.format_exc()
+    st.error("**Full Error Traceback:**")
+    st.code(error_trace, language='python')
+    st.markdown("---")
+    st.info("**Please copy the FULL error above (including traceback) and share it.**")
+    st.stop()
 
