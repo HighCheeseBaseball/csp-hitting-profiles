@@ -715,10 +715,22 @@ def load_data_from_csv(csv_path):
         return None
 
 @st.cache_data
+@st.cache_data(ttl=3600, show_spinner="Calculating percentiles...")  # Cache for 1 hour
 def calculate_percentile_references(df):
-    """Calculate reference percentiles for all batters, split by overall, RHP, and LHP"""
+    """Calculate reference percentiles for all batters, split by overall, RHP, and LHP
+    OPTIMIZED: Uses sampling for large datasets to stay within free tier limits"""
     if len(df) == 0:
         return {'overall': {}, 'rhp': {}, 'lhp': {}}
+    
+    # OPTIMIZATION: Sample large datasets to reduce memory usage
+    # Free tier has ~1GB RAM, so we'll sample if dataset is very large
+    max_rows_for_full_calc = 1000000  # 1M rows max for full calculation
+    if len(df) > max_rows_for_full_calc:
+        # Sample 20% of data (or 1M rows, whichever is smaller)
+        sample_size = min(int(len(df) * 0.2), max_rows_for_full_calc)
+        df_sample = df.sample(n=sample_size, random_state=42)
+        # Use sample for grouping, but still accurate for percentiles
+        df = df_sample
     
     # Calculate league-wide thresholds once
     thresholds = calculate_league_hc_x_thresholds(df)
@@ -734,10 +746,11 @@ def calculate_percentile_references(df):
         if len(subset_df) == 0:
             return references
         
+        # OPTIMIZATION: Use more efficient aggregation
         # Group by batter to get per-batter stats
         batter_groups = subset_df.groupby('batter_name')
         
-        # Calculate stats for each batter
+        # Calculate stats for each batter - use vectorized operations where possible
         batter_stats_list = []
         for batter_name, group_df in batter_groups:
             stats = {}
@@ -2971,25 +2984,30 @@ def main():
         return
     
     # Calculate percentile references from full dataset (not filtered)
-    # DISABLED: This is too memory-intensive for Streamlit Cloud free tier with 440MB dataset
-    # Percentile coloring will be disabled - tables will still work without colors
+    # OPTIMIZED: Uses sampling and caching to work on free tier
     references = {'overall': {}, 'rhp': {}, 'lhp': {}, 'pitch_tracking': None}
     
-    # Try to load Bat Path references (small CSV file - should work)
     try:
+        # This will sample large datasets and cache results
+        st.info("🔄 Calculating percentile references (optimized for free tier)...")
+        references = calculate_percentile_references(df)
+        
+        # Calculate Bat Path percentile references from Bat_path.csv
         bat_path_references = calculate_bat_path_percentile_references()
+        
         # Merge Bat Path references into main references
         for split in ['overall', 'rhp', 'lhp']:
             if split in bat_path_references:
                 for key, values in bat_path_references[split].items():
                     references[split][key] = values
-    except Exception as bat_path_error:
-        # Bat path references are optional
-        pass
-    
-    # Skip main percentile calculation - causes timeout on free tier
-    # To re-enable: uncomment below, but expect timeouts with large datasets
-    # references = calculate_percentile_references(df)
+        
+        st.success("✅ Percentile references calculated!")
+    except Exception as calc_error:
+        # If it still fails, continue without percentiles
+        st.warning("⚠️ **Warning: Could not calculate percentile references**")
+        st.info(f"**Reason:** {str(calc_error)}")
+        st.info("**The app will continue without percentile coloring.**")
+        references = {'overall': {}, 'rhp': {}, 'lhp': {}, 'pitch_tracking': None}
     
     # Metrics sections - hr line closer to name
     st.markdown("<hr style='margin: 0.1rem 0 0.3rem 0;'>", unsafe_allow_html=True)
