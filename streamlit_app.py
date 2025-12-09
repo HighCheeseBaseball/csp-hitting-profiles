@@ -460,69 +460,69 @@ def load_data(db_path=None, download_url=None):
                 chunk_files = sorted(glob.glob(chunk_pattern_alt))
             
             if chunk_files:
-            st.info(f"📦 Found {len(chunk_files)} database chunks. Combining them...")
-            # We have chunks - combine them
-            combined_db_path = os.path.join(script_dir, "MLB_data.sqlite")
-            
-            # Check if already combined
-            if os.path.exists(combined_db_path):
-                try:
-                    file_size = os.path.getsize(combined_db_path)
-                    if file_size > 400000000:  # More than 400MB - likely complete
-                        st.success(f"✅ Using existing combined database ({file_size / (1024*1024):.1f} MB)")
-                        db_path = combined_db_path
-                    else:
-                        st.info("Existing combined file is too small, recombining...")
-                        os.remove(combined_db_path)  # Remove incomplete file
-                except:
-                    pass
-            
-            # Combine chunks if not already done
-            if db_path is None:
-                progress_bar = st.progress(0)
-                status_text = st.empty()
+                st.info(f"📦 Found {len(chunk_files)} database chunks. Combining them...")
+                # We have chunks - combine them
+                combined_db_path = os.path.join(script_dir, "MLB_data.sqlite")
                 
-                try:
-                    total_size = sum(os.path.getsize(f) for f in chunk_files)
-                    downloaded = 0
-                    
-                    with open(combined_db_path, 'wb') as outfile:
-                        for i, chunk_file in enumerate(chunk_files):
-                            status_text.text(f"Combining chunk {i+1}/{len(chunk_files)}...")
-                            with open(chunk_file, 'rb') as infile:
-                                chunk_data = infile.read()
-                                outfile.write(chunk_data)
-                                downloaded += len(chunk_data)
-                                progress_bar.progress(min(downloaded / total_size, 1.0))
-                    
-                    # Verify it worked
-                    if os.path.exists(combined_db_path):
-                        final_size = os.path.getsize(combined_db_path)
-                        if final_size > 400000000:  # More than 400MB
-                            progress_bar.progress(1.0)
-                            status_text.text(f"✅ Database combined! ({final_size / (1024*1024):.1f} MB)")
-                            progress_bar.empty()
-                            status_text.empty()
+                # Check if already combined
+                if os.path.exists(combined_db_path):
+                    try:
+                        file_size = os.path.getsize(combined_db_path)
+                        if file_size > 400000000:  # More than 400MB - likely complete
+                            st.success(f"✅ Using existing combined database ({file_size / (1024*1024):.1f} MB)")
                             db_path = combined_db_path
                         else:
-                            st.error(f"❌ Combined file is too small: {final_size / (1024*1024):.1f} MB (expected ~440 MB)")
-                            if os.path.exists(combined_db_path):
-                                os.remove(combined_db_path)
-                    else:
-                        st.error("❌ Failed to create combined database file")
+                            st.info("Existing combined file is too small, recombining...")
+                            os.remove(combined_db_path)  # Remove incomplete file
+                    except:
+                        pass
+                
+                # Combine chunks if not already done
+                if db_path is None:
+                    progress_bar = st.progress(0)
+                    status_text = st.empty()
+                    
+                    try:
+                        total_size = sum(os.path.getsize(f) for f in chunk_files)
+                        downloaded = 0
                         
-                except Exception as e:
-                    st.error(f"❌ Error combining chunks: {str(e)}")
-                    import traceback
-                    with st.expander("Combination Error Details"):
-                        st.code(traceback.format_exc())
-                    if os.path.exists(combined_db_path):
-                        try:
-                            os.remove(combined_db_path)
-                        except:
-                            pass
-            else:
-                db_path = combined_db_path
+                        with open(combined_db_path, 'wb') as outfile:
+                            for i, chunk_file in enumerate(chunk_files):
+                                status_text.text(f"Combining chunk {i+1}/{len(chunk_files)}...")
+                                with open(chunk_file, 'rb') as infile:
+                                    chunk_data = infile.read()
+                                    outfile.write(chunk_data)
+                                    downloaded += len(chunk_data)
+                                    progress_bar.progress(min(downloaded / total_size, 1.0))
+                        
+                        # Verify it worked
+                        if os.path.exists(combined_db_path):
+                            final_size = os.path.getsize(combined_db_path)
+                            if final_size > 400000000:  # More than 400MB
+                                progress_bar.progress(1.0)
+                                status_text.text(f"✅ Database combined! ({final_size / (1024*1024):.1f} MB)")
+                                progress_bar.empty()
+                                status_text.empty()
+                                db_path = combined_db_path
+                            else:
+                                st.error(f"❌ Combined file is too small: {final_size / (1024*1024):.1f} MB (expected ~440 MB)")
+                                if os.path.exists(combined_db_path):
+                                    os.remove(combined_db_path)
+                        else:
+                            st.error("❌ Failed to create combined database file")
+                            
+                    except Exception as e:
+                        st.error(f"❌ Error combining chunks: {str(e)}")
+                        import traceback
+                        with st.expander("Combination Error Details"):
+                            st.code(traceback.format_exc())
+                        if os.path.exists(combined_db_path):
+                            try:
+                                os.remove(combined_db_path)
+                            except:
+                                pass
+                else:
+                    db_path = combined_db_path
         
         # If no database found locally, show detailed error
         if db_path is None:
