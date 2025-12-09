@@ -413,19 +413,53 @@ def load_data(db_path=None, download_url=None):
         # Your Google Drive file ID
         download_url = "https://drive.google.com/file/d/110hFkIPXtvTskgxu4rRKeEyVZFZFeyBc/view?usp=sharing"
     
-    # Try to find SQLite database file or chunks
+    # Try to find SQLite database file (single file, not chunks)
     if db_path is None:
-        # First, check if we have database chunks that need to be combined
-        chunk_dir = os.path.join(script_dir, "database_chunks")
-        chunk_pattern = os.path.join(chunk_dir, "MLB_data.sqlite.part*")
-        chunk_files = sorted(glob.glob(chunk_pattern))
+        # FIRST: Look for complete SQLite database file (prioritize single file)
+        possible_db_names = [
+            "MLB_data.sqlite",  # Prioritize this
+            "MLB_data.db",
+            "MLB25.sqlite",
+            "MLB25.db",
+            "data.sqlite",
+            "data.db"
+        ]
         
-        # Also check current directory for chunks
-        if not chunk_files:
-            chunk_pattern_alt = os.path.join(current_dir, "database_chunks", "MLB_data.sqlite.part*")
-            chunk_files = sorted(glob.glob(chunk_pattern_alt))
+        for name in possible_db_names:
+            # Try current directory first
+            full_path = os.path.join(current_dir, name)
+            if os.path.exists(full_path):
+                # Check if file is valid (not empty or pointer file)
+                try:
+                    file_size = os.path.getsize(full_path)
+                    if file_size > 1000000:  # More than 1MB, likely a real database
+                        db_path = full_path
+                        break
+                except:
+                    pass
+            # Try script directory
+            full_path = os.path.join(script_dir, name)
+            if os.path.exists(full_path):
+                try:
+                    file_size = os.path.getsize(full_path)
+                    if file_size > 1000000:
+                        db_path = full_path
+                        break
+                except:
+                    pass
         
-        if chunk_files:
+        # ONLY if single file not found, check for chunks (fallback)
+        if db_path is None:
+            chunk_dir = os.path.join(script_dir, "database_chunks")
+            chunk_pattern = os.path.join(chunk_dir, "MLB_data.sqlite.part*")
+            chunk_files = sorted(glob.glob(chunk_pattern))
+            
+            # Also check current directory for chunks
+            if not chunk_files:
+                chunk_pattern_alt = os.path.join(current_dir, "database_chunks", "MLB_data.sqlite.part*")
+                chunk_files = sorted(glob.glob(chunk_pattern_alt))
+            
+            if chunk_files:
             st.info(f"📦 Found {len(chunk_files)} database chunks. Combining them...")
             # We have chunks - combine them
             combined_db_path = os.path.join(script_dir, "MLB_data.sqlite")
@@ -490,47 +524,14 @@ def load_data(db_path=None, download_url=None):
             else:
                 db_path = combined_db_path
         
-        # Look for complete SQLite database file
-        if db_path is None:
-            possible_db_names = [
-                "MLB_data.sqlite",  # Prioritize this
-                "MLB_data.db",
-                "MLB25.sqlite",
-                "MLB25.db",
-                "data.sqlite",
-                "data.db"
-            ]
-            
-            for name in possible_db_names:
-                # Try current directory first
-                full_path = os.path.join(current_dir, name)
-                if os.path.exists(full_path):
-                    # Check if file is valid (not empty or pointer file)
-                    try:
-                        file_size = os.path.getsize(full_path)
-                        if file_size > 1000000:  # More than 1MB, likely a real database
-                            db_path = full_path
-                            break
-                    except:
-                        pass
-                # Try script directory
-                full_path = os.path.join(script_dir, name)
-                if os.path.exists(full_path):
-                    try:
-                        file_size = os.path.getsize(full_path)
-                        if file_size > 1000000:
-                            db_path = full_path
-                            break
-                    except:
-                        pass
-        
         # If no database found locally, show detailed error
         if db_path is None:
             st.error("❌ **Database file not found**")
             st.markdown("**Checked locations:**")
             st.markdown(f"- Current directory: `{current_dir}`")
             st.markdown(f"- Script directory: `{script_dir}`")
-            st.markdown(f"- Chunk directory: `{chunk_dir}`")
+            if 'chunk_dir' in locals():
+                st.markdown(f"- Chunk directory: `{chunk_dir}`")
             
             # Check what files exist
             st.markdown("**Files found:**")
@@ -655,13 +656,28 @@ def load_data(db_path=None, download_url=None):
             except Exception as e:
                 pass  # Silently handle date parsing errors
         
-        # Filter for post-season game types if column exists
+        # Filter for post-season game types if column exists and has valid values
         if 'game_type' in df.columns:
-            game_types_post = ['R', 'F', 'D', 'L', 'W']
-            df = df[df['game_type'].isin(game_types_post)]
+            # Check if game_type column has valid data
+            unique_game_types = df['game_type'].dropna().unique()
+            if len(unique_game_types) > 0:
+                # Only filter if we see these specific values (regular season + post season)
+                game_types_valid = ['R', 'F', 'D', 'L', 'W', 'S']
+                # Filter to only valid game types if they exist in data
+                if any(gt in unique_game_types for gt in game_types_valid):
+                    df = df[df['game_type'].isin(game_types_valid)]
         
         if len(df) == 0:
-            st.error("No data remaining after filtering")
+            st.error("⚠️ **No data remaining after filtering**")
+            st.info("**The database loaded successfully, but all rows were filtered out.**")
+            st.markdown("**Possible causes:**")
+            st.markdown("- Date filtering removed all data")
+            st.markdown("- Game type filtering removed all data")
+            st.markdown("- Database structure doesn't match expected format")
+            st.markdown("")
+            st.markdown("**Debug info:**")
+            if 'game_date' in df.columns if 'df' in locals() and len(df) > 0 else False:
+                st.write(f"Date range in database: {df['game_date'].min()} to {df['game_date'].max()}")
             return None
         
         # Preprocess data to add derived columns
