@@ -2971,33 +2971,25 @@ def main():
         return
     
     # Calculate percentile references from full dataset (not filtered)
-    # NOTE: This can be memory-intensive with large datasets. If it fails, we'll skip percentiles.
+    # DISABLED: This is too memory-intensive for Streamlit Cloud free tier with 440MB dataset
+    # Percentile coloring will be disabled - tables will still work without colors
     references = {'overall': {}, 'rhp': {}, 'lhp': {}, 'pitch_tracking': None}
     
+    # Try to load Bat Path references (small CSV file - should work)
     try:
-        # Show loading message but don't block if it fails
-        with st.spinner("Calculating percentile references (this may take a minute)..."):
-            references = calculate_percentile_references(df)
-            
-            # Calculate Bat Path percentile references from Bat_path.csv
-            bat_path_references = calculate_bat_path_percentile_references()
-            
-            # Merge Bat Path references into main references
-            for split in ['overall', 'rhp', 'lhp']:
-                if split in bat_path_references:
-                    for key, values in bat_path_references[split].items():
-                        references[split][key] = values
-            
-            # Pitch tracking will be calculated on demand
-            references['pitch_tracking'] = None
-    except Exception as calc_error:
-        # Don't crash - just warn and continue without percentiles
-        st.warning("⚠️ **Warning: Could not calculate percentile references**")
-        st.info(f"**Reason:** {str(calc_error)}")
-        st.info("**The app will continue without percentile coloring.**")
-        st.markdown("---")
-        # Initialize empty references so app can continue
-        references = {'overall': {}, 'rhp': {}, 'lhp': {}, 'pitch_tracking': None}
+        bat_path_references = calculate_bat_path_percentile_references()
+        # Merge Bat Path references into main references
+        for split in ['overall', 'rhp', 'lhp']:
+            if split in bat_path_references:
+                for key, values in bat_path_references[split].items():
+                    references[split][key] = values
+    except Exception as bat_path_error:
+        # Bat path references are optional
+        pass
+    
+    # Skip main percentile calculation - causes timeout on free tier
+    # To re-enable: uncomment below, but expect timeouts with large datasets
+    # references = calculate_percentile_references(df)
     
     # Metrics sections - hr line closer to name
     st.markdown("<hr style='margin: 0.1rem 0 0.3rem 0;'>", unsafe_allow_html=True)
