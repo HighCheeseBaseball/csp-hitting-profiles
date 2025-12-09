@@ -714,7 +714,6 @@ def load_data_from_csv(csv_path):
         st.error(f"Error loading CSV: {e}")
         return None
 
-@st.cache_data
 @st.cache_data(ttl=3600, show_spinner="Calculating percentiles...")  # Cache for 1 hour
 def calculate_percentile_references(df):
     """Calculate reference percentiles for all batters, split by overall, RHP, and LHP
