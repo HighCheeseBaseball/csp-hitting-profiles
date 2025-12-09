@@ -714,22 +714,10 @@ def load_data_from_csv(csv_path):
         st.error(f"Error loading CSV: {e}")
         return None
 
-@st.cache_data(ttl=3600, show_spinner="Calculating percentiles...")  # Cache for 1 hour
 def calculate_percentile_references(df):
-    """Calculate reference percentiles for all batters, split by overall, RHP, and LHP
-    OPTIMIZED: Uses sampling for large datasets to stay within free tier limits"""
+    """Calculate reference percentiles for all batters, split by overall, RHP, and LHP"""
     if len(df) == 0:
         return {'overall': {}, 'rhp': {}, 'lhp': {}}
-    
-    # OPTIMIZATION: Sample large datasets to reduce memory usage
-    # Free tier has ~1GB RAM, so we'll sample if dataset is very large
-    max_rows_for_full_calc = 1000000  # 1M rows max for full calculation
-    if len(df) > max_rows_for_full_calc:
-        # Sample 20% of data (or 1M rows, whichever is smaller)
-        sample_size = min(int(len(df) * 0.2), max_rows_for_full_calc)
-        df_sample = df.sample(n=sample_size, random_state=42)
-        # Use sample for grouping, but still accurate for percentiles
-        df = df_sample
     
     # Calculate league-wide thresholds once
     thresholds = calculate_league_hc_x_thresholds(df)
@@ -745,11 +733,10 @@ def calculate_percentile_references(df):
         if len(subset_df) == 0:
             return references
         
-        # OPTIMIZATION: Use more efficient aggregation
         # Group by batter to get per-batter stats
         batter_groups = subset_df.groupby('batter_name')
         
-        # Calculate stats for each batter - use vectorized operations where possible
+        # Calculate stats for each batter
         batter_stats_list = []
         for batter_name, group_df in batter_groups:
             stats = {}
@@ -2983,30 +2970,21 @@ def main():
         return
     
     # Calculate percentile references from full dataset (not filtered)
-    # OPTIMIZED: Uses sampling and caching to work on free tier
-    references = {'overall': {}, 'rhp': {}, 'lhp': {}, 'pitch_tracking': None}
+    references = calculate_percentile_references(df)
     
-    try:
-        # This will sample large datasets and cache results
-        st.info("🔄 Calculating percentile references (optimized for free tier)...")
-        references = calculate_percentile_references(df)
-        
-        # Calculate Bat Path percentile references from Bat_path.csv
-        bat_path_references = calculate_bat_path_percentile_references()
-        
-        # Merge Bat Path references into main references
-        for split in ['overall', 'rhp', 'lhp']:
-            if split in bat_path_references:
-                for key, values in bat_path_references[split].items():
-                    references[split][key] = values
-        
-        st.success("✅ Percentile references calculated!")
-    except Exception as calc_error:
-        # If it still fails, continue without percentiles
-        st.warning("⚠️ **Warning: Could not calculate percentile references**")
-        st.info(f"**Reason:** {str(calc_error)}")
-        st.info("**The app will continue without percentile coloring.**")
-        references = {'overall': {}, 'rhp': {}, 'lhp': {}, 'pitch_tracking': None}
+    # Calculate Bat Path percentile references from Bat_path.csv
+    bat_path_references = calculate_bat_path_percentile_references()
+    
+    # Merge Bat Path references into main references
+    for split in ['overall', 'rhp', 'lhp']:
+        if split in bat_path_references:
+            for key, values in bat_path_references[split].items():
+                references[split][key] = values
+    
+    # Calculate Pitch Tracking percentile references (only if needed - can be slow for large datasets)
+    # We'll calculate this lazily when the pitch tracking table is displayed
+    # For now, just initialize an empty dict - it will be calculated on demand
+    references['pitch_tracking'] = None  # Will be calculated on demand
     
     # Metrics sections - hr line closer to name
     st.markdown("<hr style='margin: 0.1rem 0 0.3rem 0;'>", unsafe_allow_html=True)
