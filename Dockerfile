@@ -27,13 +27,17 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Install Playwright browsers (for PDF generation)
 RUN playwright install chromium --with-deps || playwright install chromium
 
-# Copy application files
+# Copy application files (including .git for LFS)
 COPY . .
 
 # Initialize Git LFS and pull actual LFS files
-# Railway clones the repo, so we need to pull LFS files during build
+# Railway clones with LFS pointers, we need to pull the actual files
 RUN git lfs install && \
-    git lfs pull 2>&1 || echo "Warning: LFS pull may have failed - check Railway LFS configuration"
+    if [ -d .git ]; then \
+        git lfs pull; \
+    else \
+        echo "Warning: .git directory not found - LFS files may not be available"; \
+    fi
 
 # Make startup script executable and ensure Unix line endings
 RUN sed -i 's/\r$//' start.sh 2>/dev/null || true && chmod +x start.sh
