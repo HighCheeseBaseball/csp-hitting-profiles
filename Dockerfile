@@ -4,7 +4,7 @@ FROM python:3.11-slim
 # Set working directory
 WORKDIR /app
 
-# Install system dependencies (including curl for healthcheck and git-lfs)
+# Install system dependencies (including curl for healthcheck)
 RUN apt-get update && apt-get install -y \
     gcc \
     g++ \
@@ -14,8 +14,6 @@ RUN apt-get update && apt-get install -y \
     libgif-dev \
     librsvg2-dev \
     curl \
-    git \
-    git-lfs \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first for better caching
@@ -27,17 +25,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Install Playwright browsers (for PDF generation)
 RUN playwright install chromium --with-deps || playwright install chromium
 
-# Copy application files (including .git for LFS)
+# Copy application files
 COPY . .
-
-# Initialize Git LFS and pull actual LFS files
-# Railway clones with LFS pointers, we need to pull the actual files
-RUN git lfs install && \
-    if [ -d .git ]; then \
-        git lfs pull; \
-    else \
-        echo "Warning: .git directory not found - LFS files may not be available"; \
-    fi
 
 # Make startup script executable and ensure Unix line endings
 RUN sed -i 's/\r$//' start.sh 2>/dev/null || true && chmod +x start.sh
