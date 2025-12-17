@@ -9,10 +9,6 @@ import plotly.express as px
 import plotly.graph_objects as go
 from data_utils import preprocess_data
 from io import BytesIO
-import sqlite3
-import urllib.request
-import shutil
-import glob
 try:
     from reportlab.lib.pagesizes import letter, A4
     from reportlab.lib.units import inch
@@ -31,85 +27,6 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
-
-# Password protection
-def check_password():
-    """Returns `True` if the user had the correct password."""
-    
-    def get_password():
-        """Get password from secrets or environment variable."""
-        try:
-            # Try to get from Streamlit secrets first
-            return st.secrets.get("password", None)
-        except:
-            pass
-        # Fallback to environment variable
-        return os.environ.get("STREAMLIT_PASSWORD", "CSPHitting2024")
-    
-    def password_entered():
-        """Checks whether a password entered by the user is correct."""
-        correct_password = get_password()
-        if st.session_state["password"] == correct_password:
-            st.session_state["password_correct"] = True
-            del st.session_state["password"]  # Don't store password
-        else:
-            st.session_state["password_correct"] = False
-    
-    # First run, show input for password
-    if "password_correct" not in st.session_state:
-        st.title("🔒 CSP Hitting - Hitter Profiles")
-        st.markdown("---")
-        st.text_input(
-            "Enter Password", 
-            type="password", 
-            on_change=password_entered, 
-            key="password",
-            label_visibility="visible"
-        )
-        st.markdown("---")
-        return False
-    # Password correct
-    elif st.session_state["password_correct"]:
-        return True
-    # Password incorrect
-    else:
-        st.title("🔒 CSP Hitting - Hitter Profiles")
-        st.markdown("---")
-        st.error("❌ Password incorrect")
-        st.text_input(
-            "Enter Password", 
-            type="password", 
-            on_change=password_entered, 
-            key="password",
-            label_visibility="visible"
-        )
-        st.markdown("---")
-        return False
-
-# Check password before loading app
-if not check_password():
-    st.stop()  # Stop execution if password is incorrect
-
-# Add error handler to catch startup errors
-try:
-    import sys
-    import traceback
-    
-    def handle_exception(exc_type, exc_value, exc_traceback):
-        if issubclass(exc_type, KeyboardInterrupt):
-            sys.__excepthook__(exc_type, exc_value, exc_traceback)
-            return
-        
-        error_msg = ''.join(traceback.format_exception(exc_type, exc_value, exc_traceback))
-        st.error(f"**Application Error:**")
-        st.code(error_msg, language='python')
-        st.info("Please check the logs for more details.")
-    
-    # Only set handler if we're past password check
-    if "password_correct" in st.session_state and st.session_state["password_correct"]:
-        pass  # We'll handle errors in the main function instead
-except:
-    pass
 
 # Custom CSS - White background with black text
 st.markdown("""
@@ -273,411 +190,124 @@ def calculate_league_hc_x_thresholds(df):
         'center_max': upper_bound
     }
 
-def download_database_from_url(url, local_path):
-    """Download database file from URL (Google Drive or other cloud storage)"""
-    try:
-        # Extract file ID from Google Drive URL if needed
-        file_id = None
-        if 'drive.google.com' in url:
-            # Handle different Google Drive URL formats
-            if '/d/' in url:
-                file_id = url.split('/d/')[1].split('/')[0]
-            elif 'id=' in url:
-                file_id = url.split('id=')[1].split('&')[0]
-            
-            if not file_id:
-                st.error("Could not extract file ID from Google Drive URL")
-                return False
-            
-            # Direct download URL
-            download_url = f"https://drive.google.com/uc?export=download&id={file_id}"
-        else:
-            download_url = url
-        
-        # Download the file
-        progress_bar = st.progress(0)
-        status_text = st.empty()
-        status_text.text("Downloading database from Google Drive... This may take 5-10 minutes (440MB)")
-        
-        try:
-            # For large files, we need to handle Google Drive's virus scan warning
-            opener = urllib.request.build_opener()
-            opener.addheaders = [('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')]
-            
-            # First attempt
-            try:
-                response = opener.open(download_url, timeout=30)
-            except Exception as e:
-                st.error(f"Failed to connect to Google Drive: {str(e)}")
-                return False
-            
-            # Check if Google Drive is showing a virus scan warning page
-            try:
-                content = response.read()
-                content_str = content.decode('utf-8', errors='ignore').lower()
-                
-                if 'virus scan warning' in content_str or 'large file' in content_str:
-                    # Need to confirm download - extract confirmation token
-                    import re
-                    confirm_match = re.search(r'confirm=([^&"\']+)', content.decode('utf-8', errors='ignore'))
-                    if confirm_match and file_id:
-                        confirm_token = confirm_match.group(1)
-                        download_url = f"https://drive.google.com/uc?export=download&id={file_id}&confirm={confirm_token}"
-                        response.close()
-                        response = opener.open(download_url, timeout=30)
-                    elif file_id:
-                        # Try with confirm=t parameter
-                        download_url = f"https://drive.google.com/uc?export=download&id={file_id}&confirm=t"
-                        response.close()
-                        response = opener.open(download_url, timeout=30)
-            except Exception as e:
-                st.warning(f"Warning reading response: {str(e)}")
-                # Continue anyway - might still work
-            
-            # Get file size if available
-            try:
-                total_size = int(response.headers.get('Content-Length', 0))
-            except:
-                total_size = 0
-            
-            # Write to local file
-            downloaded = 0
-            chunk_size = 8192 * 4  # 32KB chunks for faster download
-            
-            with open(local_path, 'wb') as f:
-                while True:
-                    try:
-                        chunk = response.read(chunk_size)
-                        if not chunk:
-                            break
-                        f.write(chunk)
-                        downloaded += len(chunk)
-                        
-                        # Update progress
-                        if total_size > 0:
-                            progress = min(downloaded / total_size, 1.0)
-                            progress_bar.progress(progress)
-                            status_text.text(f"Downloaded: {downloaded / (1024*1024):.1f} MB / {total_size / (1024*1024):.1f} MB")
-                        else:
-                            status_text.text(f"Downloaded: {downloaded / (1024*1024):.1f} MB...")
-                    except Exception as e:
-                        st.error(f"Error during download: {str(e)}")
-                        return False
-            
-            progress_bar.progress(1.0)
-            status_text.text("Download complete!")
-            
-            # Verify file was downloaded
-            if os.path.exists(local_path) and os.path.getsize(local_path) > 1000000:
-                progress_bar.empty()
-                status_text.empty()
-                return True
-            else:
-                st.error("Downloaded file appears to be invalid or too small")
-                return False
-                
-        except Exception as e:
-            st.error(f"Error during download: {str(e)}")
-            import traceback
-            with st.expander("Technical Details"):
-                st.code(traceback.format_exc())
-            return False
-        finally:
-            try:
-                response.close()
-            except:
-                pass
-        
-    except Exception as e:
-        st.error(f"Error downloading database: {str(e)}")
-        import traceback
-        with st.expander("Technical Details"):
-            st.code(traceback.format_exc())
-        return False
-
-def load_data(db_path=None, download_url=None):
-    """Load data from SQLite database - prioritize MLB_data.sqlite"""
+@st.cache_data
+def load_data(csv_path=None):
+    """Load data from CSV file - prioritize MLB_data.csv"""
     # Get the current working directory
     current_dir = os.getcwd()
     script_dir = os.path.dirname(os.path.abspath(__file__))
     
-    # Try to get download URL from secrets if not provided
-    if download_url is None:
-        try:
-            download_url = st.secrets.get("database_download_url", None)
-        except:
-            download_url = None
-    
-    # Default Google Drive URL (fallback if not in secrets)
-    if download_url is None:
-        # Your Google Drive file ID
-        download_url = "https://drive.google.com/file/d/110hFkIPXtvTskgxu4rRKeEyVZFZFeyBc/view?usp=sharing"
-    
-    # Try to find SQLite database file (single file, not chunks)
-    if db_path is None:
-        # FIRST: Look for complete SQLite database file (prioritize single file)
-        possible_db_names = [
-            "MLB_data.sqlite",  # Prioritize this
-            "MLB_data.db",
-            "MLB25.sqlite",
-            "MLB25.db",
-            "data.sqlite",
-            "data.db"
+    # Try to find CSV file
+    if csv_path is None:
+        # Look for MLB_data.csv first (main data file)
+        possible_names = [
+            "MLB_data.csv",  # Prioritize this
+            "MLB25.csv",
+            "MLB_25.csv", 
+            "data.csv",
+            "hitter_data.csv",
+            "pitch_data.csv"
         ]
         
-        for name in possible_db_names:
+        csv_path = None
+        for name in possible_names:
             # Try current directory first
             full_path = os.path.join(current_dir, name)
             if os.path.exists(full_path):
-                # Check if file is valid (not empty or pointer file)
-                try:
-                    file_size = os.path.getsize(full_path)
-                    if file_size > 1000000:  # More than 1MB, likely a real database
-                        db_path = full_path
-                        break
-                except:
-                    pass
+                csv_path = full_path
+                break
             # Try script directory
             full_path = os.path.join(script_dir, name)
             if os.path.exists(full_path):
-                try:
-                    file_size = os.path.getsize(full_path)
-                    if file_size > 1000000:
-                        db_path = full_path
-                        break
-                except:
-                    pass
+                csv_path = full_path
+                break
         
-        # ONLY if single file not found, check for chunks (fallback)
-        if db_path is None:
-            chunk_dir = os.path.join(script_dir, "database_chunks")
-            chunk_pattern = os.path.join(chunk_dir, "MLB_data.sqlite.part*")
-            chunk_files = sorted(glob.glob(chunk_pattern))
-            
-            # Also check current directory for chunks
-            if not chunk_files:
-                chunk_pattern_alt = os.path.join(current_dir, "database_chunks", "MLB_data.sqlite.part*")
-                chunk_files = sorted(glob.glob(chunk_pattern_alt))
-            
-            if chunk_files:
-                st.info(f"📦 Found {len(chunk_files)} database chunks. Combining them...")
-                # We have chunks - combine them
-                combined_db_path = os.path.join(script_dir, "MLB_data.sqlite")
-                
-                # Check if already combined
-                if os.path.exists(combined_db_path):
-                    try:
-                        file_size = os.path.getsize(combined_db_path)
-                        if file_size > 400000000:  # More than 400MB - likely complete
-                            st.success(f"✅ Using existing combined database ({file_size / (1024*1024):.1f} MB)")
-                            db_path = combined_db_path
-                        else:
-                            st.info("Existing combined file is too small, recombining...")
-                            os.remove(combined_db_path)  # Remove incomplete file
-                    except:
-                        pass
-                
-                # Combine chunks if not already done
-                if db_path is None:
-                    progress_bar = st.progress(0)
-                    status_text = st.empty()
-                    
-                    try:
-                        total_size = sum(os.path.getsize(f) for f in chunk_files)
-                        downloaded = 0
-                        
-                        with open(combined_db_path, 'wb') as outfile:
-                            for i, chunk_file in enumerate(chunk_files):
-                                status_text.text(f"Combining chunk {i+1}/{len(chunk_files)}...")
-                                with open(chunk_file, 'rb') as infile:
-                                    chunk_data = infile.read()
-                                    outfile.write(chunk_data)
-                                    downloaded += len(chunk_data)
-                                    progress_bar.progress(min(downloaded / total_size, 1.0))
-                        
-                        # Verify it worked
-                        if os.path.exists(combined_db_path):
-                            final_size = os.path.getsize(combined_db_path)
-                            if final_size > 400000000:  # More than 400MB
-                                progress_bar.progress(1.0)
-                                status_text.text(f"✅ Database combined! ({final_size / (1024*1024):.1f} MB)")
-                                progress_bar.empty()
-                                status_text.empty()
-                                db_path = combined_db_path
-                            else:
-                                st.error(f"❌ Combined file is too small: {final_size / (1024*1024):.1f} MB (expected ~440 MB)")
-                                if os.path.exists(combined_db_path):
-                                    os.remove(combined_db_path)
-                        else:
-                            st.error("❌ Failed to create combined database file")
-                            
-                    except Exception as e:
-                        st.error(f"❌ Error combining chunks: {str(e)}")
-                        import traceback
-                        with st.expander("Combination Error Details"):
-                            st.code(traceback.format_exc())
-                        if os.path.exists(combined_db_path):
-                            try:
-                                os.remove(combined_db_path)
-                            except:
-                                pass
+        if csv_path is None:
+            # List CSV files in directory
+            try:
+                csv_files = [f for f in os.listdir(current_dir) if f.endswith('.csv') and f != 'Bat_path.csv']
+                if csv_files:
+                    csv_path = os.path.join(current_dir, csv_files[0])  # Use first CSV found (excluding Bat_path.csv)
                 else:
-                    db_path = combined_db_path
-        
-        # If no database found locally, show detailed error
-        if db_path is None:
-            st.error("❌ **Database file not found**")
-            st.markdown("**Checked locations:**")
-            st.markdown(f"- Current directory: `{current_dir}`")
-            st.markdown(f"- Script directory: `{script_dir}`")
-            if 'chunk_dir' in locals():
-                st.markdown(f"- Chunk directory: `{chunk_dir}`")
-            
-            # Check what files exist
-            st.markdown("**Files found:**")
-            if os.path.exists(chunk_dir):
-                chunk_files_found = os.listdir(chunk_dir)
-                if chunk_files_found:
-                    st.info(f"Found {len(chunk_files_found)} files in chunk directory")
-                    for f in sorted(chunk_files_found)[:5]:
-                        st.text(f"  - {f}")
-                    if len(chunk_files_found) > 5:
-                        st.text(f"  ... and {len(chunk_files_found) - 5} more")
-                else:
-                    st.warning("Chunk directory exists but is empty")
-            else:
-                st.warning(f"Chunk directory does not exist: {chunk_dir}")
-            
-            st.markdown("**Looking for:**")
-            st.markdown("- Complete database: `MLB_data.sqlite`")
-            st.markdown("- Database chunks: `database_chunks/MLB_data.sqlite.part*`")
-            st.markdown("")
-            st.markdown("**Please ensure:**")
-            st.markdown("1. All 9 chunks are uploaded to GitHub in `database_chunks/` folder")
-            st.markdown("2. Files are named correctly: `MLB_data.sqlite.part000` through `part008`")
-            st.stop()
-            return None
-        
-        # If still no database found, show helpful error
-        if db_path is None:
-            st.error("⚠️ **Database file not found**")
-            st.info("MLB_data.sqlite is not available locally and couldn't be downloaded.")
-            st.markdown("**Possible causes:**")
-            st.markdown("1. Google Drive file is not set to 'Anyone with the link can view'")
-            st.markdown("2. Download timed out (file is 440MB)")
-            st.markdown("3. Network/connection issue")
-            st.markdown("")
-            if download_url:
-                st.info(f"**Download URL:** {download_url}")
-                st.markdown("**To fix:**")
-                st.markdown("1. Go to your Google Drive file")
-                st.markdown("2. Right-click → Share → Change to 'Anyone with the link'")
-                st.markdown("3. Refresh this page and try again")
-            st.stop()
-            return None
+                    # Try the script directory
+                    csv_files = [f for f in os.listdir(script_dir) if f.endswith('.csv') and f != 'Bat_path.csv']
+                    if csv_files:
+                        csv_path = os.path.join(script_dir, csv_files[0])
+                    else:
+                        st.error(f"No CSV file found in current directory: {current_dir}")
+                        st.info(f"Please ensure MLB_data.csv (or another CSV file) is in the same directory as the app.")
+                        st.info(f"Looking for files: {', '.join(possible_names)}")
+                        return None
+            except Exception as e:
+                st.error(f"Error searching for CSV files: {e}")
+                return None
     
-    if not os.path.exists(db_path):
-        st.error(f"Database file not found: {db_path}")
+    if not os.path.exists(csv_path):
+        st.error(f"CSV file not found: {csv_path}")
+        st.info(f"Current directory: {current_dir}")
         return None
     
     try:
-        # Connect to SQLite database
-        try:
-            conn = sqlite3.connect(db_path)
-        except Exception as conn_error:
-            st.error(f"Failed to connect to database: {str(conn_error)}")
-            st.info(f"Database path: {db_path}")
+        # Try different encodings and separators
+        df = None
+        encodings = ['utf-8', 'latin-1', 'cp1252']
+        separators = [',', ';', '\t']
+        
+        for encoding in encodings:
+            for sep in separators:
+                try:
+                    df = pd.read_csv(csv_path, encoding=encoding, sep=sep, low_memory=False)
+                    if len(df) > 0:
+                                        # Don't show success message
+                        break
+                except:
+                    continue
+            if df is not None and len(df) > 0:
+                break
+        
+        if df is None or len(df) == 0:
+            st.error("Could not read CSV file or file is empty")
             return None
         
-        try:
-            # Try common table names
-            possible_tables = ['MLB25', 'MLB_data', 'data', 'main']
-            table_name = None
-            
-            cursor = conn.cursor()
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
-            available_tables = [row[0] for row in cursor.fetchall()]
-            
-            # Find matching table
-            for table in possible_tables:
-                if table in available_tables:
-                    table_name = table
-                    break
-            
-            if not table_name:
-                if available_tables:
-                    table_name = available_tables[0]  # Use first available table
-                    st.info(f"Using table: {table_name}")
-                else:
-                    st.error("No tables found in database")
-                    conn.close()
-                    return None
-            
-            # Load data from database
-            query = f"SELECT * FROM {table_name}"
-            df = pd.read_sql_query(query, conn)
-            
-            if df is None or len(df) == 0:
-                st.error("Database is empty")
-                conn.close()
-                return None
-                
-        finally:
-            conn.close()
+        # Convert game_date to datetime - handle different date formats and column names
+        date_col = None
+        possible_date_cols = ['game_date', 'Game_Date', 'GAME_DATE', 'date', 'Date', 'DATE', 'gameDate', 'GameDate', 'game_date_utc']
         
-        # Convert game_date to datetime
-        if 'game_date' in df.columns:
+        for col in possible_date_cols:
+            if col in df.columns:
+                date_col = col
+                break
+        
+        if date_col:
             try:
-                # SQLite stores dates as REAL (numeric) or TEXT
-                if pd.api.types.is_numeric_dtype(df['game_date']):
-                    # Try different numeric date formats
-                    sample_value = df['game_date'].dropna().iloc[0] if len(df['game_date'].dropna()) > 0 else None
-                    
-                    if sample_value is not None:
-                        # Check if it's a Unix timestamp (seconds since 1970 - usually 10+ digits)
-                        if sample_value > 1000000000:  # Likely Unix timestamp
-                            df['game_date'] = pd.to_datetime(df['game_date'], unit='s', errors='coerce')
-                        # Check if it's Unix timestamp in milliseconds (13+ digits)
-                        elif sample_value > 1000000000000:
-                            df['game_date'] = pd.to_datetime(df['game_date'], unit='ms', errors='coerce')
-                        # Otherwise assume Excel serial date (days since 1900)
-                        else:
-                            df['game_date'] = pd.to_datetime('1899-12-30') + pd.to_timedelta(df['game_date'], unit='D')
-                    else:
-                        df['game_date'] = pd.to_datetime(df['game_date'], errors='coerce')
-                else:
-                    # Try parsing as datetime string
-                    df['game_date'] = pd.to_datetime(df['game_date'], errors='coerce')
+                # Try parsing as datetime first
+                df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
+                
+                # If that fails, try Excel date serial number
+                if df[date_col].isna().all():
+                    # Check if original column is numeric (Excel serial date)
+                    original_series = df[date_col]
+                    if pd.api.types.is_numeric_dtype(original_series):
+                        df[date_col] = pd.to_datetime('1899-12-30') + pd.to_timedelta(original_series, unit='D')
                 
                 # Filter out invalid dates
-                df = df[df['game_date'].notna()]
+                df = df[df[date_col].notna()]
                 # Filter out dates before 2000 (likely errors)
-                df = df[df['game_date'] >= pd.Timestamp('2000-01-01')]
+                df = df[df[date_col] >= pd.Timestamp('2000-01-01')]
+                
+                # Rename to 'game_date' for consistency
+                if date_col != 'game_date':
+                    df = df.rename(columns={date_col: 'game_date'})
             except Exception as e:
                 pass  # Silently handle date parsing errors
         
-        # Filter for post-season game types if column exists and has valid values
+        # Filter for post-season game types if column exists
         if 'game_type' in df.columns:
-            # Check if game_type column has valid data
-            unique_game_types = df['game_type'].dropna().unique()
-            if len(unique_game_types) > 0:
-                # Only filter if we see these specific values (regular season + post season)
-                game_types_valid = ['R', 'F', 'D', 'L', 'W', 'S']
-                # Filter to only valid game types if they exist in data
-                if any(gt in unique_game_types for gt in game_types_valid):
-                    df = df[df['game_type'].isin(game_types_valid)]
+            game_types_post = ['R', 'F', 'D', 'L', 'W']
+            df = df[df['game_type'].isin(game_types_post)]
         
         if len(df) == 0:
-            st.error("⚠️ **No data remaining after filtering**")
-            st.info("**The database loaded successfully, but all rows were filtered out.**")
-            st.markdown("**Possible causes:**")
-            st.markdown("- Date filtering removed all data")
-            st.markdown("- Game type filtering removed all data")
-            st.markdown("- Database structure doesn't match expected format")
-            st.markdown("")
-            st.markdown("**Debug info:**")
-            if 'game_date' in df.columns if 'df' in locals() and len(df) > 0 else False:
-                st.write(f"Date range in database: {df['game_date'].min()} to {df['game_date'].max()}")
+            st.error("No data remaining after filtering")
             return None
         
         # Preprocess data to add derived columns
@@ -686,50 +316,10 @@ def load_data(db_path=None, download_url=None):
         return df
         
     except Exception as e:
-        st.error(f"Error loading database: {e}")
-        import traceback
-        st.error(traceback.format_exc())
-        return None
-
-def load_data_from_csv(csv_path):
-    """Fallback function to load data from CSV (for backwards compatibility)"""
-    try:
-        encodings = ['utf-8', 'latin-1', 'cp1252']
-        separators = [',', ';', '\t']
-        
-        df = None
-        for encoding in encodings:
-            for sep in separators:
-                try:
-                    df = pd.read_csv(csv_path, encoding=encoding, sep=sep, low_memory=False)
-                    if len(df) > 0:
-                        break
-                except:
-                    continue
-            if df is not None and len(df) > 0:
-                break
-        
-        if df is None or len(df) == 0:
-            st.error("Could not read CSV file")
-            return None
-        
-        # Convert dates and filter (same as before)
-        if 'game_date' in df.columns:
-            df['game_date'] = pd.to_datetime(df['game_date'], errors='coerce')
-            df = df[df['game_date'].notna()]
-            df = df[df['game_date'] >= pd.Timestamp('2000-01-01')]
-        
-        if 'game_type' in df.columns:
-            game_types_post = ['R', 'F', 'D', 'L', 'W']
-            df = df[df['game_type'].isin(game_types_post)]
-        
-        df = preprocess_data(df)
-        return df
-        
-    except Exception as e:
         st.error(f"Error loading CSV: {e}")
         return None
 
+@st.cache_data
 def calculate_percentile_references(df):
     """Calculate reference percentiles for all batters, split by overall, RHP, and LHP"""
     if len(df) == 0:
@@ -2813,177 +2403,106 @@ def generate_pdf_with_reportlab(batter_name, filtered_df, references, full_df, b
 # Main app
 def main():
     # Load data (no title, no upload option)
-    try:
-        st.info("🔄 Loading data...")
-        df = load_data()
-    except Exception as load_error:
-        st.error("❌ **ERROR: Failed to load data**")
-        st.error(f"**Error message:** {str(load_error)}")
-        st.markdown("---")
-        import traceback
-        error_details = traceback.format_exc()
-        st.error("**Full error traceback:**")
-        st.code(error_details, language='python')
-        st.markdown("---")
-        st.info("**Please copy the error above and share it so we can fix this.**")
-        st.stop()
-        return
-    
+    df = load_data()
     if df is None:
-        st.error("❌ **ERROR: Data is None**")
-        st.info("The load_data() function returned None.")
-        st.markdown("**Check the messages above for details about what went wrong.**")
         st.stop()
-        return
     
-    if len(df) == 0:
-        st.error("❌ **ERROR: Data is empty**")
-        st.info("The database was loaded but contains no rows.")
-        st.markdown("**This might mean:**")
-        st.markdown("- Database is empty")
-        st.markdown("- All data was filtered out")
-        st.markdown("- Wrong table selected")
+    # Sidebar filters
+    
+    # Get unique values and format names - try to find batter name column
+    batter_name_col = 'batter_name'
+    if 'batter_name' not in df.columns:
+        # Try common variations
+        possible_names = ['batter', 'Batter', 'BATTER', 'player_name', 'Player', 'name', 'Name']
+        for name in possible_names:
+            if name in df.columns:
+                batter_name_col = name
+                # Rename for consistency
+                df = df.rename(columns={name: 'batter_name'})
+                break
+    
+    if 'batter_name' in df.columns:
+        # Filter out null/empty names
+        df = df[df['batter_name'].notna()].copy()
+        df = df[df['batter_name'].astype(str).str.strip() != ''].copy()
+        
+        batter_names_raw = sorted(df['batter_name'].unique())
+        # Create display names (First Last) and mapping
+        batter_display_names = [format_batter_name(name) for name in batter_names_raw]
+        # Create mapping from display name to original name
+        name_mapping = {display: original for display, original in zip(batter_display_names, batter_names_raw)}
+    else:
+        st.error("No batter names found in data")
+        st.info(f"Looking for column: 'batter_name' or variations")
+        st.info(f"Available columns: {', '.join(df.columns[:30])}")
         st.stop()
-        return
     
-    st.success(f"✅ Data loaded successfully! ({len(df):,} rows)")
-    
-    # Process and prepare data for UI
-    try:
-        st.info("🔄 Processing data...")
-        
-        # Sidebar filters
-        
-        # Get unique values and format names - try to find batter name column
-        batter_name_col = 'batter_name'
-        if 'batter_name' not in df.columns:
-            # Try common variations
-            possible_names = ['batter', 'Batter', 'BATTER', 'player_name', 'Player', 'name', 'Name']
-            for name in possible_names:
-                if name in df.columns:
-                    batter_name_col = name
-                    # Rename for consistency
-                    df = df.rename(columns={name: 'batter_name'})
-                    break
-        
-        if 'batter_name' in df.columns:
-            # Filter out null/empty names
-            df = df[df['batter_name'].notna()].copy()
-            df = df[df['batter_name'].astype(str).str.strip() != ''].copy()
-            
-            batter_names_raw = sorted(df['batter_name'].unique())
-            # Create display names (First Last) and mapping
-            batter_display_names = [format_batter_name(name) for name in batter_names_raw]
-            # Create mapping from display name to original name
-            name_mapping = {display: original for display, original in zip(batter_display_names, batter_names_raw)}
-        else:
-            st.error("❌ **No batter names found in data**")
-            st.info(f"Looking for column: 'batter_name' or variations")
-            st.info(f"Available columns: {', '.join(df.columns[:30])}")
-            st.stop()
-            return
-        
-        if len(batter_display_names) == 0:
-            st.error("❌ **No batter names found in data after filtering**")
-            st.stop()
-            return
-            
-    except Exception as process_error:
-        st.error("❌ **ERROR: Failed to process data**")
-        st.error(f"**Error:** {str(process_error)}")
-        import traceback
-        st.error("**Full error traceback:**")
-        st.code(traceback.format_exc(), language='python')
-        st.info("**Please copy the error above and share it.**")
+    if len(batter_display_names) == 0:
+        st.error("No batter names found in data after filtering")
         st.stop()
-        return
     
-    # UI Setup and Data Filtering
-    try:
-        selected_batter_display = st.sidebar.selectbox(
-            "Select Batter",
-            options=batter_display_names,
-            index=0
-        )
-        
-        # Get the original name format for filtering
-        selected_batter = name_mapping[selected_batter_display]
-        
-        # Date range - fix date handling (game_date should exist after load_data processing)
-        if 'game_date' in df.columns and len(df) > 0:
-            # Filter out invalid dates first
-            valid_dates = df[df['game_date'].notna()]['game_date']
-            if len(valid_dates) > 0:
-                min_date = valid_dates.min().date()
-                max_date = valid_dates.max().date()
-                # Ensure dates are reasonable (not 1970)
-                if min_date.year < 2000:
-                    min_date = date(2020, 1, 1)
-                if max_date.year < 2000:
-                    max_date = date.today()
-            else:
+    selected_batter_display = st.sidebar.selectbox(
+        "Select Batter",
+        options=batter_display_names,
+        index=0
+    )
+    
+    # Get the original name format for filtering
+    selected_batter = name_mapping[selected_batter_display]
+    
+    # Date range - fix date handling (game_date should exist after load_data processing)
+    if 'game_date' in df.columns and len(df) > 0:
+        # Filter out invalid dates first
+        valid_dates = df[df['game_date'].notna()]['game_date']
+        if len(valid_dates) > 0:
+            min_date = valid_dates.min().date()
+            max_date = valid_dates.max().date()
+            # Ensure dates are reasonable (not 1970)
+            if min_date.year < 2000:
                 min_date = date(2020, 1, 1)
+            if max_date.year < 2000:
                 max_date = date.today()
         else:
-            # If no game_date column, use default range (date filtering will be skipped)
             min_date = date(2020, 1, 1)
             max_date = date.today()
+    else:
+        # If no game_date column, use default range (date filtering will be skipped)
+        min_date = date(2020, 1, 1)
+        max_date = date.today()
+    
+    date_range = st.sidebar.date_input(
+        "Date Range",
+        value=(min_date, max_date),
+        min_value=min_date,
+        max_value=max_date
+    )
+    
+    # Pitcher handedness - removed, always use all
+    selected_p_throws = ['R', 'L'] if 'p_throws' in df.columns else []
+    
+    # Filter data
+    filtered_df = df[df['batter_name'] == selected_batter].copy()
+    
+    # Apply date filter if game_date column exists
+    if 'game_date' in filtered_df.columns and isinstance(date_range, tuple) and len(date_range) == 2:
+        # Ensure game_date is datetime
+        if not pd.api.types.is_datetime64_any_dtype(filtered_df['game_date']):
+            try:
+                filtered_df['game_date'] = pd.to_datetime(filtered_df['game_date'], errors='coerce')
+            except:
+                pass
         
-        date_range = st.sidebar.date_input(
-            "Date Range",
-            value=(min_date, max_date),
-            min_value=min_date,
-            max_value=max_date
-        )
-        
-        # Pitcher handedness - removed, always use all
-        selected_p_throws = ['R', 'L'] if 'p_throws' in df.columns else []
-        
-        # Filter data
-        filtered_df = df[df['batter_name'] == selected_batter].copy()
-        
-        # Apply date filter if game_date column exists
-        if 'game_date' in filtered_df.columns and isinstance(date_range, tuple) and len(date_range) == 2:
-            # Ensure game_date is datetime
-            if not pd.api.types.is_datetime64_any_dtype(filtered_df['game_date']):
-                try:
-                    filtered_df['game_date'] = pd.to_datetime(filtered_df['game_date'], errors='coerce')
-                except:
-                    pass
-            
-            if pd.api.types.is_datetime64_any_dtype(filtered_df['game_date']):
-                filtered_df = filtered_df[
-                    (filtered_df['game_date'].dt.date >= date_range[0]) &
-                    (filtered_df['game_date'].dt.date <= date_range[1])
-                ]
-        
-        if selected_p_throws and 'p_throws' in filtered_df.columns:
-            filtered_df = filtered_df[filtered_df['p_throws'].isin(selected_p_throws)]
-        
-        # Header - logo and hitter name (name perfectly centered on page)
-        logo_col, name_col, empty_col = st.columns([1.5, 3, 1.5])
-        with logo_col:
-            logo_path = "CSP-Full-Logo.png"
-            if os.path.exists(logo_path):
-                st.markdown("<div style='display: flex; align-items: center; height: 100%;'>", unsafe_allow_html=True)
-                st.image(logo_path, width=350)
-                st.markdown("</div>", unsafe_allow_html=True)
-            else:
-                st.write("")  # Empty space if logo not found
-        with name_col:
-            st.markdown(f"<h3 style='text-align: center; margin-bottom: 0.1rem; margin-top: 0.1rem; color: #000000; padding-top: 1rem;'>{selected_batter_display}</h3>", unsafe_allow_html=True)
-        with empty_col:
-            st.write("")  # Empty column for spacing
-            
-    except Exception as ui_error:
-        st.error("❌ **ERROR: Failed to set up UI or filter data**")
-        st.error(f"**Error:** {str(ui_error)}")
-        import traceback
-        st.error("**Full error traceback:**")
-        st.code(traceback.format_exc(), language='python')
-        st.info("**Please copy the error above and share it.**")
-        st.stop()
-        return
+        if pd.api.types.is_datetime64_any_dtype(filtered_df['game_date']):
+            filtered_df = filtered_df[
+                (filtered_df['game_date'].dt.date >= date_range[0]) &
+                (filtered_df['game_date'].dt.date <= date_range[1])
+            ]
+    
+    if selected_p_throws and 'p_throws' in filtered_df.columns:
+        filtered_df = filtered_df[filtered_df['p_throws'].isin(selected_p_throws)]
+    
+    # Header - use display name, centered, black text
+    st.markdown(f"<h3 style='text-align: center; margin-bottom: 0.1rem; margin-top: 0.1rem; color: #000000;'>{selected_batter_display}</h3>", unsafe_allow_html=True)
     
     # Calculate percentile references from full dataset (not filtered)
     references = calculate_percentile_references(df)
@@ -3244,23 +2763,6 @@ def main():
             save_notes(notes)
             st.session_state.profile_notes = notes
 
-# Run the app - wrap in error handler
-try:
-    if __name__ == "__main__":
-        main()
-except SystemExit:
-    # This is normal when using st.stop()
-    pass
-except Exception as e:
-    st.error("❌ **CRITICAL ERROR - App Crashed**")
-    st.error(f"**Error Type:** {type(e).__name__}")
-    st.error(f"**Error Message:** {str(e)}")
-    st.markdown("---")
-    import traceback
-    error_trace = traceback.format_exc()
-    st.error("**Full Error Traceback:**")
-    st.code(error_trace, language='python')
-    st.markdown("---")
-    st.info("**Please copy the FULL error above (including traceback) and share it.**")
-    st.stop()
+if __name__ == "__main__":
+    main()
 
