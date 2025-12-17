@@ -120,25 +120,28 @@ st.markdown("""
     .stDataFrame table {
         margin-bottom: 0.2rem !important;
     }
-    /* Sidebar styling - white text */
+    /* Sidebar styling - black text */
     [data-testid="stSidebar"] * {
-        color: #ffffff !important;
+        color: #000000 !important;
     }
     [data-testid="stSidebar"] label {
-        color: #ffffff !important;
+        color: #000000 !important;
     }
     [data-testid="stSidebar"] p, [data-testid="stSidebar"] div, [data-testid="stSidebar"] span {
-        color: #ffffff !important;
+        color: #000000 !important;
     }
     [data-testid="stSidebar"] .stSelectbox label,
     [data-testid="stSidebar"] .stDateInput label {
-        color: #ffffff !important;
+        color: #000000 !important;
     }
     [data-testid="stSidebar"] [data-baseweb="select"] > div {
-        color: #ffffff !important;
+        color: #000000 !important;
     }
     [data-testid="stSidebar"] input {
-        color: #ffffff !important;
+        color: #000000 !important;
+    }
+    [data-testid="stSidebar"] .stSelectbox > div > div {
+        color: #000000 !important;
     }
     /* Notes section styling */
     .stTextArea textarea {
@@ -238,7 +241,8 @@ def load_data(csv_path=None):
                 if download_url:
                     csv_path = os.path.join(current_dir, "MLB_data.csv")
                     if not os.path.exists(csv_path) or (os.path.exists(csv_path) and os.path.getsize(csv_path) < 1000):
-                        with st.spinner("Downloading data file from Google Drive (this may take a few minutes)..."):
+                        st.info("⚠️ **Large file download in progress** - This may take 5-10 minutes for a ~900MB file. Please be patient and don't close this page.")
+                        with st.spinner("Downloading data file from Google Drive (this may take several minutes for large files)..."):
                             try:
                                 import gdown
                                 import re
@@ -260,16 +264,43 @@ def load_data(csv_path=None):
                                 if file_id:
                                     # Use gdown to download (handles large files and virus scan warnings)
                                     gdown_url = f"https://drive.google.com/uc?id={file_id}"
-                                    gdown.download(gdown_url, csv_path, quiet=False)
                                     
-                                    # Verify download
-                                    if os.path.exists(csv_path) and os.path.getsize(csv_path) > 1000:
-                                        file_size_mb = os.path.getsize(csv_path) / (1024*1024)
-                                        st.success(f"Data file downloaded successfully! ({file_size_mb:.1f} MB)")
-                                    else:
-                                        st.error("Download failed - file is too small or empty.")
-                                        if os.path.exists(csv_path):
-                                            os.remove(csv_path)
+                                    # Download with retry logic for large files
+                                    max_retries = 3
+                                    retry_count = 0
+                                    download_success = False
+                                    
+                                    while retry_count < max_retries and not download_success:
+                                        try:
+                                            if retry_count > 0:
+                                                st.info(f"Retrying download (attempt {retry_count + 1}/{max_retries})...")
+                                            
+                                            # Use gdown to download
+                                            gdown.download(gdown_url, csv_path, quiet=False)
+                                            
+                                            # Verify download
+                                            if os.path.exists(csv_path) and os.path.getsize(csv_path) > 1000:
+                                                file_size_mb = os.path.getsize(csv_path) / (1024*1024)
+                                                # Don't show success message - file is downloaded, will use cached version
+                                                download_success = True
+                                            else:
+                                                raise Exception("Downloaded file is too small or empty")
+                                                
+                                        except Exception as download_error:
+                                            retry_count += 1
+                                            if os.path.exists(csv_path):
+                                                os.remove(csv_path)
+                                            
+                                            if retry_count >= max_retries:
+                                                st.error(f"Download failed after {max_retries} attempts: {str(download_error)}")
+                                                st.info("The file is very large. Please refresh the page to try again.")
+                                                return None
+                                            else:
+                                                # Wait before retry
+                                                import time
+                                                time.sleep(2)
+                                    
+                                    if not download_success:
                                         return None
                                 else:
                                     # Not a Google Drive URL, use regular download
