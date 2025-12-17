@@ -242,6 +242,7 @@ def load_data(csv_path=None):
                             try:
                                 import gdown
                                 import re
+                                import requests
                                 
                                 # Extract file ID from Google Drive URL or use directly if it's just an ID
                                 file_id = None
@@ -271,11 +272,7 @@ def load_data(csv_path=None):
                                             os.remove(csv_path)
                                         return None
                                 else:
-                                    st.error("Could not extract file ID from Google Drive URL. Please use the full sharing link or just the file ID.")
-                                    return None
-                                else:
                                     # Not a Google Drive URL, use regular download
-                                    import requests
                                     response = requests.get(download_url, stream=True)
                                     with open(csv_path, 'wb') as f:
                                         for chunk in response.iter_content(chunk_size=8192):
