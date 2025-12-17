@@ -243,31 +243,36 @@ def load_data(csv_path=None):
                                 import gdown
                                 import re
                                 
-                                # Extract file ID from Google Drive URL
+                                # Extract file ID from Google Drive URL or use directly if it's just an ID
                                 file_id = None
-                                if 'drive.google.com' in download_url:
+                                
+                                # Check if it's already just a file ID (no URL)
+                                if len(download_url) < 50 and '/' not in download_url and 'http' not in download_url:
+                                    # It's likely just the file ID
+                                    file_id = download_url
+                                elif 'drive.google.com' in download_url:
                                     # Extract ID from various Google Drive URL formats
                                     match = re.search(r'/d/([a-zA-Z0-9_-]+)', download_url)
                                     if match:
                                         file_id = match.group(1)
+                                
+                                if file_id:
+                                    # Use gdown to download (handles large files and virus scan warnings)
+                                    gdown_url = f"https://drive.google.com/uc?id={file_id}"
+                                    gdown.download(gdown_url, csv_path, quiet=False)
                                     
-                                    if file_id:
-                                        # Use gdown to download (handles large files and virus scan warnings)
-                                        gdown_url = f"https://drive.google.com/uc?id={file_id}"
-                                        gdown.download(gdown_url, csv_path, quiet=False)
-                                        
-                                        # Verify download
-                                        if os.path.exists(csv_path) and os.path.getsize(csv_path) > 1000:
-                                            file_size_mb = os.path.getsize(csv_path) / (1024*1024)
-                                            st.success(f"Data file downloaded successfully! ({file_size_mb:.1f} MB)")
-                                        else:
-                                            st.error("Download failed - file is too small or empty.")
-                                            if os.path.exists(csv_path):
-                                                os.remove(csv_path)
-                                            return None
+                                    # Verify download
+                                    if os.path.exists(csv_path) and os.path.getsize(csv_path) > 1000:
+                                        file_size_mb = os.path.getsize(csv_path) / (1024*1024)
+                                        st.success(f"Data file downloaded successfully! ({file_size_mb:.1f} MB)")
                                     else:
-                                        st.error("Could not extract file ID from Google Drive URL.")
+                                        st.error("Download failed - file is too small or empty.")
+                                        if os.path.exists(csv_path):
+                                            os.remove(csv_path)
                                         return None
+                                else:
+                                    st.error("Could not extract file ID from Google Drive URL. Please use the full sharing link or just the file ID.")
+                                    return None
                                 else:
                                     # Not a Google Drive URL, use regular download
                                     import requests
