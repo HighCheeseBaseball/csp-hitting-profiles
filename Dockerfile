@@ -4,7 +4,7 @@ FROM python:3.11-slim
 # Set working directory
 WORKDIR /app
 
-# Install system dependencies (including curl for healthcheck)
+# Install system dependencies (including curl for healthcheck and git-lfs)
 RUN apt-get update && apt-get install -y \
     gcc \
     g++ \
@@ -14,6 +14,8 @@ RUN apt-get update && apt-get install -y \
     libgif-dev \
     librsvg2-dev \
     curl \
+    git \
+    git-lfs \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first for better caching
@@ -27,6 +29,11 @@ RUN playwright install chromium --with-deps || playwright install chromium
 
 # Copy application files
 COPY . .
+
+# Initialize Git LFS and pull actual LFS files
+# Railway clones the repo, so we need to pull LFS files during build
+RUN git lfs install && \
+    git lfs pull 2>&1 || echo "Warning: LFS pull may have failed - check Railway LFS configuration"
 
 # Make startup script executable and ensure Unix line endings
 RUN sed -i 's/\r$//' start.sh 2>/dev/null || true && chmod +x start.sh
