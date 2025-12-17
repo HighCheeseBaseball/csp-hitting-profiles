@@ -237,41 +237,64 @@ def load_data(csv_path=None):
                 
                 if download_url:
                     csv_path = os.path.join(current_dir, "MLB_data.csv")
-                    if not os.path.exists(csv_path):
-                        with st.spinner("Downloading data file (this may take a few minutes)..."):
-                            # Handle Google Drive large file downloads
-                            import requests
-                            session = requests.Session()
-                            response = session.get(download_url, stream=True)
-                            
-                            # Check if it's a Google Drive virus scan warning page
-                            if 'virus scan warning' in response.text.lower() or response.headers.get('Content-Type', '').startswith('text/html'):
-                                # Extract the actual download link
-                                confirm_token = None
-                                for line in response.text.split('\n'):
-                                    if 'confirm=' in line:
-                                        confirm_token = line.split('confirm=')[1].split('&')[0]
-                                        break
+                    if not os.path.exists(csv_path) or (os.path.exists(csv_path) and os.path.getsize(csv_path) < 1000):
+                        with st.spinner("Downloading data file from Google Drive (this may take a few minutes)..."):
+                            try:
+                                import gdown
+                                import re
                                 
-                                if confirm_token:
-                                    download_url = f"{download_url.split('&')[0]}&confirm={confirm_token}"
-                                    response = session.get(download_url, stream=True)
-                            
-                            # Download the file
-                            total_size = int(response.headers.get('content-length', 0))
-                            with open(csv_path, 'wb') as f:
-                                downloaded = 0
-                                for chunk in response.iter_content(chunk_size=8192):
-                                    if chunk:
-                                        f.write(chunk)
-                                        downloaded += len(chunk)
-                            
-                            st.success(f"Data file downloaded successfully! ({downloaded / (1024*1024):.1f} MB)")
+                                # Extract file ID from Google Drive URL
+                                file_id = None
+                                if 'drive.google.com' in download_url:
+                                    # Extract ID from various Google Drive URL formats
+                                    match = re.search(r'/d/([a-zA-Z0-9_-]+)', download_url)
+                                    if match:
+                                        file_id = match.group(1)
+                                    
+                                    if file_id:
+                                        # Use gdown to download (handles large files and virus scan warnings)
+                                        gdown_url = f"https://drive.google.com/uc?id={file_id}"
+                                        gdown.download(gdown_url, csv_path, quiet=False)
+                                        
+                                        # Verify download
+                                        if os.path.exists(csv_path) and os.path.getsize(csv_path) > 1000:
+                                            file_size_mb = os.path.getsize(csv_path) / (1024*1024)
+                                            st.success(f"Data file downloaded successfully! ({file_size_mb:.1f} MB)")
+                                        else:
+                                            st.error("Download failed - file is too small or empty.")
+                                            if os.path.exists(csv_path):
+                                                os.remove(csv_path)
+                                            return None
+                                    else:
+                                        st.error("Could not extract file ID from Google Drive URL.")
+                                        return None
+                                else:
+                                    # Not a Google Drive URL, use regular download
+                                    import requests
+                                    response = requests.get(download_url, stream=True)
+                                    with open(csv_path, 'wb') as f:
+                                        for chunk in response.iter_content(chunk_size=8192):
+                                            if chunk:
+                                                f.write(chunk)
+                                    if os.path.getsize(csv_path) > 1000:
+                                        file_size_mb = os.path.getsize(csv_path) / (1024*1024)
+                                        st.success(f"Data file downloaded successfully! ({file_size_mb:.1f} MB)")
+                                    else:
+                                        st.error("Download failed - file is too small.")
+                                        return None
+                            except Exception as e:
+                                st.error(f"Download failed: {str(e)}")
+                                if os.path.exists(csv_path):
+                                    os.remove(csv_path)
+                                return None
                     else:
-                        st.info("Using cached data file.")
+                        file_size = os.path.getsize(csv_path) / (1024*1024)
+                        st.info(f"Using cached data file ({file_size:.1f} MB).")
             except Exception as e:
-                st.warning(f"Could not download data file: {str(e)}")
+                st.error(f"Could not download data file: {str(e)}")
                 st.info("Please check that MLB_DATA_URL is set correctly in Railway variables.")
+                import traceback
+                st.code(traceback.format_exc())
         
         if csv_path is None:
             # List CSV files in directory
