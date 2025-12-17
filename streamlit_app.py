@@ -165,6 +165,39 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
+# Password protection
+def check_password():
+    """Returns `True` if the user had the correct password."""
+    
+    def password_entered():
+        """Checks whether a password entered by the user is correct."""
+        password = st.session_state.get("password", "")
+        # Get password from environment variable or secrets
+        correct_password = os.getenv('STREAMLIT_PASSWORD') or st.secrets.get('password', '')
+        
+        if password == correct_password:
+            st.session_state["password_correct"] = True
+            del st.session_state["password"]  # Don't store password
+        else:
+            st.session_state["password_correct"] = False
+    
+    if "password_correct" not in st.session_state:
+        # First run, show input for password
+        st.text_input("Password", type="password", on_change=password_entered, key="password")
+        return False
+    elif not st.session_state["password_correct"]:
+        # Password not correct, show input + error
+        st.text_input("Password", type="password", on_change=password_entered, key="password")
+        st.error("😕 Password incorrect")
+        return False
+    else:
+        # Password correct
+        return True
+
+# Check password before showing app
+if not check_password():
+    st.stop()
+
 # Initialize session state
 if 'profile_notes' not in st.session_state:
     st.session_state.profile_notes = {}

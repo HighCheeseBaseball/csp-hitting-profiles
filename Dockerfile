@@ -22,11 +22,36 @@ COPY requirements.txt .
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Install gdown for downloading data file during build
+RUN pip install --no-cache-dir gdown
+
 # Install Playwright browsers (for PDF generation)
 RUN playwright install chromium --with-deps || playwright install chromium
 
 # Copy application files
 COPY . .
+
+# Download data file during build to avoid runtime timeouts
+# Set MLB_DATA_URL as build arg (Railway will pass the env var as build arg)
+ARG MLB_DATA_URL
+RUN if [ -n "$MLB_DATA_URL" ]; then \
+        echo "Downloading data file during build..."; \
+        file_id="$MLB_DATA_URL"; \
+        # If it's a full URL, extract the ID
+        if echo "$MLB_DATA_URL" | grep -q "drive.google.com"; then \
+            file_id=$(echo "$MLB_DATA_URL" | grep -oE '/d/([a-zA-Z0-9_-]+)' | cut -d'/' -f3); \
+        fi; \
+        if [ -n "$file_id" ]; then \
+            echo "Downloading file ID: $file_id"; \
+            gdown "https://drive.google.com/uc?id=$file_id" -O MLB_data.csv && \
+            echo "Data file downloaded successfully during build" || \
+            echo "Build-time download failed, will download at runtime"; \
+        else \
+            echo "Could not extract file ID from MLB_DATA_URL"; \
+        fi; \
+    else \
+        echo "MLB_DATA_URL not set, will download at runtime if needed"; \
+    fi
 
 # Make startup script executable and ensure Unix line endings
 RUN sed -i 's/\r$//' start.sh 2>/dev/null || true && chmod +x start.sh
