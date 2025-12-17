@@ -193,6 +193,8 @@ def calculate_league_hc_x_thresholds(df):
 @st.cache_data
 def load_data(csv_path=None):
     """Load data from CSV file - prioritize MLB_data.csv"""
+    import urllib.request
+    
     # Get the current working directory
     current_dir = os.getcwd()
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -221,6 +223,55 @@ def load_data(csv_path=None):
             if os.path.exists(full_path):
                 csv_path = full_path
                 break
+        
+        # If MLB_data.csv not found, try downloading from cloud storage
+        if csv_path is None:
+            # Check for download URL in environment variable or secrets
+            try:
+                download_url = os.getenv('MLB_DATA_URL')
+                if not download_url:
+                    try:
+                        download_url = st.secrets.get('mlb_data_url', None)
+                    except:
+                        download_url = None
+                
+                if download_url:
+                    csv_path = os.path.join(current_dir, "MLB_data.csv")
+                    if not os.path.exists(csv_path):
+                        with st.spinner("Downloading data file (this may take a few minutes)..."):
+                            # Handle Google Drive large file downloads
+                            import requests
+                            session = requests.Session()
+                            response = session.get(download_url, stream=True)
+                            
+                            # Check if it's a Google Drive virus scan warning page
+                            if 'virus scan warning' in response.text.lower() or response.headers.get('Content-Type', '').startswith('text/html'):
+                                # Extract the actual download link
+                                confirm_token = None
+                                for line in response.text.split('\n'):
+                                    if 'confirm=' in line:
+                                        confirm_token = line.split('confirm=')[1].split('&')[0]
+                                        break
+                                
+                                if confirm_token:
+                                    download_url = f"{download_url.split('&')[0]}&confirm={confirm_token}"
+                                    response = session.get(download_url, stream=True)
+                            
+                            # Download the file
+                            total_size = int(response.headers.get('content-length', 0))
+                            with open(csv_path, 'wb') as f:
+                                downloaded = 0
+                                for chunk in response.iter_content(chunk_size=8192):
+                                    if chunk:
+                                        f.write(chunk)
+                                        downloaded += len(chunk)
+                            
+                            st.success(f"Data file downloaded successfully! ({downloaded / (1024*1024):.1f} MB)")
+                    else:
+                        st.info("Using cached data file.")
+            except Exception as e:
+                st.warning(f"Could not download data file: {str(e)}")
+                st.info("Please check that MLB_DATA_URL is set correctly in Railway variables.")
         
         if csv_path is None:
             # List CSV files in directory
